@@ -168,6 +168,19 @@ button:hover {
   background: rgba(249, 115, 22, 0.12);
 }
 
+#episodeList li.annotated::before {
+  content: '●';
+  color: #22c55e;
+  font-size: 0.7rem;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+#episodeList li.annotated:not(.active) {
+  border-color: rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.06);
+}
+
 .viewer {
   display: flex;
   flex-direction: column;
@@ -714,4 +727,33 @@ button:disabled {
 
 .toast-info .toast-icon {
   color: var(--accent-2);
+}
+
+.label-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.label-chips:empty {
+  display: none;
+}
+
+.label-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+}
+
+.label-chip:hover {
+  border-color: var(--accent-2);
+  color: var(--accent-2);
+  background: rgba(6, 182, 212, 0.1);
 }

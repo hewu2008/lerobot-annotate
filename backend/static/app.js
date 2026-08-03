@@ -177,6 +177,7 @@ const subtaskSetStart = document.getElementById('subtaskSetStart');
 const subtaskSetEnd = document.getElementById('subtaskSetEnd');
 const addSubtask = document.getElementById('addSubtask');
 const subtaskList = document.getElementById('subtaskList');
+const subtaskLabelChips = document.getElementById('subtaskLabelChips');
 
 const hlStart = document.getElementById('hlStart');
 const hlEnd = document.getElementById('hlEnd');
@@ -198,6 +199,7 @@ const taskName = document.getElementById('taskName');
 const taskSetStart = document.getElementById('taskSetStart');
 const taskSetEnd = document.getElementById('taskSetEnd');
 const addTask = document.getElementById('addTask');
+const taskLabelChips = document.getElementById('taskLabelChips');
 
 const exportBtn = document.getElementById('exportBtn');
 const outputDir = document.getElementById('outputDir');
@@ -374,6 +376,14 @@ function getEpisodeAnnotations(epIdx) {
   return state.annotations[epIdx];
 }
 
+function isEpisodeAnnotated(epIdx) {
+  const ann = state.annotations[epIdx];
+  if (!ann) return false;
+  return (ann.subtasks && ann.subtasks.length > 0) ||
+         (ann.high_levels && ann.high_levels.length > 0) ||
+         (ann.tasks && ann.tasks.length > 0);
+}
+
 function renderEpisodes() {
   episodeList.innerHTML = '';
   const query = episodeSearch.value.trim();
@@ -387,9 +397,59 @@ function renderEpisodes() {
     if (state.currentEpisode === ep.episode_index) {
       li.classList.add('active');
     }
+    if (isEpisodeAnnotated(ep.episode_index)) {
+      li.classList.add('annotated');
+      li.title = 'Annotated';
+    }
     li.addEventListener('click', () => selectEpisode(ep.episode_index));
     episodeList.appendChild(li);
   });
+}
+
+function renderLabelChips() {
+  // Collect unique task names and subtask labels from all annotations
+  const taskNames = new Set();
+  const subtaskLabels = new Set();
+  for (const epAnn of Object.values(state.annotations)) {
+    for (const seg of epAnn.tasks || []) {
+      if (seg.name) taskNames.add(seg.name);
+    }
+    for (const seg of epAnn.subtasks || []) {
+      if (seg.label) subtaskLabels.add(seg.label);
+    }
+  }
+
+  // Render task label chips
+  if (taskLabelChips) {
+    taskLabelChips.innerHTML = '';
+    Array.from(taskNames).sort().forEach(name => {
+      const chip = document.createElement('span');
+      chip.className = 'label-chip';
+      chip.textContent = name;
+      chip.title = `Fill task label: ${name}`;
+      chip.addEventListener('click', () => {
+        taskName.value = name;
+        taskName.focus();
+      });
+      taskLabelChips.appendChild(chip);
+    });
+  }
+
+  // Render subtask label chips
+  if (subtaskLabelChips) {
+    subtaskLabelChips.innerHTML = '';
+    Array.from(subtaskLabels).sort().forEach(label => {
+      const chip = document.createElement('span');
+      chip.className = 'label-chip';
+      chip.textContent = label;
+      chip.title = `Fill subtask label: ${label}`;
+      chip.addEventListener('click', () => {
+        subtaskLabel.value = label;
+        subtaskLabel.focus();
+      });
+      subtaskLabelChips.appendChild(chip);
+    });
+  }
 }
 
 function buildSubtaskIndexMap(annotations) {
@@ -829,6 +889,7 @@ async function selectEpisode(epIdx) {
   renderEpisodes();
   renderSubtasks();
   renderHighLevels();
+  renderLabelChips();
 }
 
 async function saveEpisode() {
@@ -871,6 +932,8 @@ async function saveEpisode() {
       saveStatus.textContent = '✓ Episode saved';
       saveStatus.style.color = '#22c55e';
     }
+    renderEpisodes();
+    renderLabelChips();
     return true;
   } catch (err) {
     console.error('[Save Episode] Error:', err);
@@ -922,6 +985,7 @@ connectForm.addEventListener('submit', async (event) => {
       episodeVideo.style.display = 'none';
     }
     renderEpisodes();
+    renderLabelChips();
   } catch (err) {
     setStatus('Disconnected');
     setHelper(connectHelper, err.message);
@@ -975,6 +1039,8 @@ addSubtask.addEventListener('click', () => {
   ann.subtasks.push({ start, end, label });
   renderSubtasks();
   renderTimeline();
+  renderEpisodes();
+  renderLabelChips();
   subtaskLabel.value = '';
 });
 
@@ -1006,6 +1072,7 @@ addHighLevel.addEventListener('click', () => {
     response_type: hlResponse.value.trim() || null,
   });
   renderHighLevels();
+  renderEpisodes();
   hlUser.value = '';
   hlRobot.value = '';
 });
@@ -1059,6 +1126,8 @@ addTask.addEventListener('click', async () => {
   const ok = await saveEpisode();
   if (ok) {
     showToast('Task saved successfully', 'success');
+    renderEpisodes();
+    renderLabelChips();
   } else {
     showToast('Failed to save task', 'error');
   }
@@ -1071,6 +1140,8 @@ resetEpisodeBtn.addEventListener('click', () => {
   renderSubtasks();
   renderHighLevels();
   renderTimeline();
+  renderEpisodes();
+  renderLabelChips();
   // Reset task form to episode defaults
   const epData = state.currentEpisodeData;
   if (epData) {
