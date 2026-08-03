@@ -19,6 +19,8 @@ from fastapi.staticfiles import StaticFiles
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from pydantic import BaseModel
 
+from lerobot_converter import process_dataset_with_annotations
+
 APP_ROOT = Path(__file__).resolve().parent
 STATIC_DIR = APP_ROOT / "static"
 CACHE_ROOT = Path(os.environ.get("LEROBOT_ANNOTATE_CACHE", "/tmp/lerobot_annotate_cache"))
@@ -895,6 +897,58 @@ def export_dataset(payload: dict[str, Any]) -> JSONResponse:
     copy_videos = bool(payload.get("copy_videos", False))
     result = manager.export_dataset(output_dir=output_dir, copy_videos=copy_videos)
     return JSONResponse(result)
+
+
+@app.post("/api/convert_to_lerobot")
+def convert_to_lerobot(payload: dict[str, Any]) -> JSONResponse:
+    """Convert annotations to LeRobot standard format with episode deletion/trimming.
+
+    Uses lerobot's APIs to:
+    1. Load the original dataset
+    2. Delete episodes marked for deletion
+    3. Trim remaining episodes to annotated task time ranges
+    4. Save as a new LeRobot-compatible dataset
+    """
+    if manager.dataset_root is None or manager.info is None:
+        raise HTTPException(status_code=400, detail="Dataset not loaded")
+
+    output_dir_str = payload.get("output_dir")
+    if output_dir_str:
+        out_root = Path(output_dir_str).expanduser().resolve()
+    else:
+        EXPORT_ROOT.mkdir(parents=True, exist_ok=True)
+        name = (manager.repo_id or "local_dataset").replace("/", "__")
+        out_root = EXPORT_ROOT / f"{name}_processed"
+
+    # Use the new processing function that loads, deletes/trims, and saves
+    try:
+        summary = process_dataset_with_annotations(
+            dataset_root=manager.dataset_root,
+            annotations=manager.annotations,
+            deleted_episodes=manager.deleted_episodes,
+            output_dir=out_root,
+            info=manager.info,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Processing failed: {e}")
+
+    return JSONResponse({
+        "ok": True,
+        "output_dir": summary["output_dir"],
+        "total_episodes": summary["total_episodes"],
+        "total_frames": summary["total_frames"],
+        "total_tasks": summary["total_tasks"],
+        "tasks": summary["tasks"],
+        "original_episodes": summary["original_episodes"],
+        "deleted_episodes": summary["deleted_episodes"],
+        "message": "Dataset processed successfully: episodes deleted/trimmed and saved in LeRobot format",
+    })
 
 
 class PushToHubRequest(BaseModel):
