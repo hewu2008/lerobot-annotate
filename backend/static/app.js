@@ -910,6 +910,7 @@ async function loadTrajectory(epIdx) {
     trajectoryData = await res.json();
     trajectorySection.style.display = '';
     drawTrajectory();
+    requestAnimationFrame(syncEpisodesHeight);
   } catch (err) {
     console.warn('[Trajectory] No data:', err);
     trajectoryData = null;
@@ -1493,6 +1494,21 @@ trajectoryCanvas.addEventListener('click', (e) => {
     trajHoverX = clickX;
     drawTrajectory();
   }
+});
+
+function syncEpisodesHeight() {
+  const viewer = document.querySelector('.viewer');
+  const episodes = document.querySelector('.episodes');
+  if (!viewer || !episodes) return;
+  const h = viewer.getBoundingClientRect().height;
+  episodes.style.maxHeight = h + 'px';
+}
+
+window.addEventListener('load', () => {
+  syncEpisodesHeight();
+  const observer = new ResizeObserver(() => syncEpisodesHeight());
+  const viewer = document.querySelector('.viewer');
+  if (viewer) observer.observe(viewer);
 });
 
 tabs.forEach(tab => {
