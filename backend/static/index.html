@@ -25,21 +25,25 @@
             Source
             <select id="sourceSelect">
               <option value="hf">Hugging Face Hub</option>
-              <option value="local">Local path</option>
+              <option value="local" selected>Local path</option>
             </select>
           </label>
-          <label>
-            Repo ID
-            <input id="repoInput" type="text" placeholder="lerobot/your-dataset" />
-          </label>
+          <span id="repoIdField">
+            <label>
+              Repo ID
+              <input id="repoInput" type="text" placeholder="lerobot/your-dataset" />
+            </label>
+          </span>
           <label>
             Local path
             <input id="localInput" type="text" placeholder="/path/to/dataset" />
           </label>
-          <label>
-            Revision
-            <input id="revisionInput" type="text" placeholder="main (optional)" />
-          </label>
+          <span id="revisionField">
+            <label>
+              Revision
+              <input id="revisionInput" type="text" placeholder="main (optional)" />
+            </label>
+          </span>
         </div>
         <div class="row">
           <label>
@@ -47,7 +51,7 @@
             <select id="videoKeySelect"></select>
           </label>
           <label class="checkbox">
-            <input id="showAllVideos" type="checkbox" />
+            <input id="showAllVideos" type="checkbox" checked />
             Show all cameras
           </label>
           <button type="submit" class="primary">Load dataset</button>

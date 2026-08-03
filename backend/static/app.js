@@ -125,6 +125,8 @@ console.log('[App] handlePushToHub function defined');
 const statusEl = document.getElementById('status');
 const connectForm = document.getElementById('connectForm');
 const sourceSelect = document.getElementById('sourceSelect');
+const repoIdField = document.getElementById('repoIdField');
+const revisionField = document.getElementById('revisionField');
 const repoInput = document.getElementById('repoInput');
 const localInput = document.getElementById('localInput');
 const revisionInput = document.getElementById('revisionInput');
@@ -190,6 +192,15 @@ showAllVideos.addEventListener('change', () => {
     selectEpisode(state.currentEpisode);
   }
 });
+
+// Toggle source-specific fields
+function updateSourceFields() {
+  const isLocal = sourceSelect.value === 'local';
+  repoIdField.style.display = isLocal ? 'none' : '';
+  revisionField.style.display = isLocal ? 'none' : '';
+}
+sourceSelect.addEventListener('change', updateSourceFields);
+updateSourceFields();
 const exportStatus = document.getElementById('exportStatus');
 
 // Push to Hub elements
