@@ -234,31 +234,15 @@
       
       <div class="export-section">
         <h3>Convert to LeRobot standard format</h3>
-        <p class="muted">Generate tasks.jsonl, update episodes.jsonl, and compute episode statistics in-place.</p>
+        <p class="muted">Load source dataset, delete/trim episodes per annotations, renumber sequentially, and regenerate all LeRobot metadata (tasks.jsonl, episodes.jsonl, stats.json) with re-encoded videos.</p>
         <div class="row">
           <label class="grow">
-            Output directory (optional, defaults to current dataset)
-            <input id="convertOutputDir" type="text" placeholder="Leave empty to update in-place" />
+            Output directory (optional, defaults to auto-generated path)
+            <input id="convertOutputDir" type="text" placeholder="Leave empty for default output directory" />
           </label>
           <button id="convertBtn" class="primary">Convert to LeRobot</button>
         </div>
         <div class="helper" id="convertStatus"></div>
-      </div>
-
-      <div class="export-section">
-        <h3>Export to local directory</h3>
-        <div class="row">
-          <label class="grow">
-            Output directory (optional)
-            <input id="outputDir" type="text" placeholder="/tmp/lerobot_annotate_exports/your_dataset" />
-          </label>
-          <label class="checkbox">
-            <input id="copyVideos" type="checkbox" />
-            Copy videos instead of symlink
-          </label>
-          <button id="exportBtn" class="primary">Export locally</button>
-        </div>
-        <div class="helper" id="exportStatus"></div>
       </div>
 
       <div class="export-section">

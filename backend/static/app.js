@@ -201,9 +201,7 @@ const taskSetEnd = document.getElementById('taskSetEnd');
 const addTask = document.getElementById('addTask');
 const taskLabelChips = document.getElementById('taskLabelChips');
 
-const exportBtn = document.getElementById('exportBtn');
-const outputDir = document.getElementById('outputDir');
-const copyVideos = document.getElementById('copyVideos');
+
 
 const trajectorySection = document.getElementById('trajectorySection');
 const trajectoryCanvas = document.getElementById('trajectoryCanvas');
@@ -241,7 +239,7 @@ function updateSourceFields() {
 }
 sourceSelect.addEventListener('change', updateSourceFields);
 updateSourceFields();
-const exportStatus = document.getElementById('exportStatus');
+
 
 // Push to Hub elements
 const hfToken = document.getElementById('hfToken');
@@ -1616,7 +1614,9 @@ convertBtn.addEventListener('click', async () => {
       const taskList = data.tasks && data.tasks.length > 0 
         ? `<br><span class="muted">Tasks: ${data.tasks.join(', ')}</span>` 
         : '';
-      convertStatus.innerHTML = `✓ Converted successfully${taskList}`;
+      const stats = `<br><span class="muted">${data.total_episodes} episodes, ${data.total_frames} frames (from ${data.original_episodes} original)</span>`;
+      const outDir = data.output_dir ? `<br><span class="muted">Output: ${data.output_dir}</span>` : '';
+      convertStatus.innerHTML = `✓ Converted successfully${outDir}${stats}${taskList}`;
       showToast('Converted to LeRobot standard format', 'success');
     } else {
       convertStatus.textContent = data.detail || 'Conversion failed';
@@ -1625,33 +1625,6 @@ convertBtn.addEventListener('click', async () => {
   } catch (err) {
     convertStatus.textContent = err.message || 'Conversion failed';
     showToast(err.message || 'Conversion failed', 'error');
-  }
-});
-
-exportBtn.addEventListener('click', async () => {
-  exportStatus.textContent = 'Exporting and converting to LeRobot standard format...';
-  const payload = {
-    output_dir: outputDir.value.trim() || null,
-    copy_videos: copyVideos.checked,
-  };
-  try {
-    const res = await fetch('/api/export', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    if (res.ok) {
-      exportStatus.innerHTML = `✓ Exported to ${data.output_dir}<br>
-        <span class="muted">LeRobot format: ${data.total_tasks} tasks, ${data.subtasks} subtasks, ${data.tasks_high_level} high-level</span>`;
-      showToast('Dataset exported in LeRobot standard format', 'success');
-    } else {
-      exportStatus.textContent = data.detail || 'Export failed';
-      showToast(data.detail || 'Export failed', 'error');
-    }
-  } catch (err) {
-    exportStatus.textContent = err.message || 'Export failed';
-    showToast(err.message || 'Export failed', 'error');
   }
 });
 
