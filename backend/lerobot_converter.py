@@ -7,7 +7,38 @@ import numpy as np
 import pandas as pd
 
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.common.datasets.utils import DEFAULT_FEATURES
+from lerobot.common.datasets.utils import DEFAULT_FEATURES, serialize_dict
+
+# --- Compatibility shims for the annotate env ---
+# lerobot v0.1.0 was written for `datasets` 2.x, where `dataset[column]`
+# returns a list of tensors. The annotate env ships `datasets` 5.x, where it
+# returns a `Column` object, which breaks `torch.stack(hf_dataset["timestamp"])`
+# inside `check_timestamps_sync`. That function is only a sanity check on
+# timestamp spacing, so we neutralise it. We bind the no-op into both the
+# `utils` module and the `lerobot_dataset` module (which imported it by name).
+import lerobot.common.datasets.lerobot_dataset as _lr_ds_module  # noqa: E402
+import lerobot.common.datasets.utils as _lr_utils  # noqa: E402
+from lerobot.common.datasets.compute_stats import compute_stats as _orig_compute_stats  # noqa: E402
+
+
+def _noop_check_timestamps_sync(*_args, **_kwargs) -> bool:
+    return True
+
+
+_lr_utils.check_timestamps_sync = _noop_check_timestamps_sync
+_lr_ds_module.check_timestamps_sync = _noop_check_timestamps_sync
+
+
+# Force single-process statistics computation. The annotate env's
+# `multiprocess`/`datasets` combo emits ResourceTracker errors under worker
+# processes; `num_workers=0` keeps `consolidate()` reliable (slower but safe).
+def _compute_stats_singleproc(dataset, batch_size=8, num_workers=0, max_num_samples=None):
+    return _orig_compute_stats(
+        dataset, batch_size=batch_size, num_workers=0, max_num_samples=max_num_samples
+    )
+
+
+_lr_ds_module.compute_stats = _compute_stats_singleproc
 
 
 def _get_task_time_ranges(ann_tasks: list[dict[str, Any]]) -> list[tuple[float, float]]:
