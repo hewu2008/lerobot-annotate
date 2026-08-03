@@ -1,3 +1,3 @@
 #!/bin/bash
 
-uvicorn backend.app:app --reload --port 7860
+uvicorn backend.app:app --reload --host 0.0.0.0 --port 7860
