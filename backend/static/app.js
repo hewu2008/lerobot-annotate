@@ -138,6 +138,10 @@ const episodeTitle = document.getElementById('episodeTitle');
 const episodeMeta = document.getElementById('episodeMeta');
 const episodeVideo = document.getElementById('episodeVideo');
 const multiVideoGrid = document.getElementById('multiVideoGrid');
+const multiVideoControls = document.getElementById('multiVideoControls');
+const multiPlayPause = document.getElementById('multiPlayPause');
+const multiSeek = document.getElementById('multiSeek');
+const multiTimeDisplay = document.getElementById('multiTimeDisplay');
 const episodeVideoLoading = document.getElementById('episodeVideoLoading');
 const noVideoMessage = document.getElementById('noVideoMessage');
 const timeline = document.getElementById('timeline');
@@ -535,11 +539,13 @@ async function renderMultiCameraGrid(epIdx) {
 
   multiVideoGrid.innerHTML = '';
   multiVideoGrid.style.display = '';
+  multiVideoControls.style.display = '';
   episodeVideo.style.display = 'none';
   episodeVideoLoading.style.display = '';
 
   const primaryKey = state.dataset.selected_video_key;
   let primaryVideo = null;
+  const secondaryVideos = [];
 
   videoKeys.forEach(key => {
     const item = document.createElement('div');
@@ -557,7 +563,8 @@ async function renderMultiCameraGrid(epIdx) {
     label.textContent = labelText;
 
     const video = document.createElement('video');
-    video.controls = true;
+    // No native controls on any video; the unified bar drives playback
+    video.controls = false;
     video.preload = 'metadata';
     video.src = `/api/video/${epIdx}?video_key=${encodeURIComponent(key)}`;
     video.muted = key !== primaryKey;
@@ -568,14 +575,84 @@ async function renderMultiCameraGrid(epIdx) {
 
     if (key === primaryKey) {
       primaryVideo = video;
-      // Attach event listeners to primary video
-      video.addEventListener('loadedmetadata', () => {
-        renderTimeline();
-        updateTimeDisplay();
-      });
-      video.addEventListener('timeupdate', updateTimeDisplay);
+    } else {
+      secondaryVideos.push(video);
     }
   });
+
+  // Guard against feedback loops when syncing
+  let isSyncing = false;
+
+  // Unified control bar drives the primary video
+  const setPlayPauseIcon = () => {
+    multiPlayPause.innerHTML = primaryVideo.paused ? '&#9654;' : '&#10073;&#10073;';
+  };
+
+  const updateSeekBar = () => {
+    const dur = primaryVideo.duration || 0;
+    const cur = primaryVideo.currentTime || 0;
+    if (dur > 0) {
+      multiSeek.value = String(Math.round((cur / dur) * 1000));
+    }
+    multiTimeDisplay.textContent = `${formatTimeWithMs(cur)} / ${formatTimeWithMs(dur)}`;
+  };
+
+  multiPlayPause.onclick = () => {
+    if (primaryVideo.paused) {
+      primaryVideo.play();
+    } else {
+      primaryVideo.pause();
+    }
+  };
+
+  multiSeek.oninput = () => {
+    const dur = primaryVideo.duration || 0;
+    if (dur > 0) {
+      primaryVideo.currentTime = (Number(multiSeek.value) / 1000) * dur;
+    }
+  };
+
+  // Primary video events -> update control bar + sync secondaries
+  primaryVideo.addEventListener('loadedmetadata', () => {
+    renderTimeline();
+    updateTimeDisplay();
+    updateSeekBar();
+    setPlayPauseIcon();
+  });
+  primaryVideo.addEventListener('timeupdate', () => {
+    updateTimeDisplay();
+    updateSeekBar();
+  });
+  primaryVideo.addEventListener('play', () => {
+    setPlayPauseIcon();
+    if (isSyncing) return;
+    isSyncing = true;
+    secondaryVideos.forEach(v => v.play().catch(() => {}));
+    isSyncing = false;
+  });
+  primaryVideo.addEventListener('pause', () => {
+    setPlayPauseIcon();
+    if (isSyncing) return;
+    isSyncing = true;
+    secondaryVideos.forEach(v => v.pause());
+    isSyncing = false;
+  });
+  primaryVideo.addEventListener('seeked', () => {
+    updateSeekBar();
+    if (isSyncing) return;
+    isSyncing = true;
+    const t = primaryVideo.currentTime;
+    secondaryVideos.forEach(v => { v.currentTime = t; });
+    isSyncing = false;
+  });
+  primaryVideo.addEventListener('ratechange', () => {
+    const rate = primaryVideo.playbackRate;
+    secondaryVideos.forEach(v => { v.playbackRate = rate; });
+  });
+
+  // Initial state
+  setPlayPauseIcon();
+  updateSeekBar();
 
   // Hide loading when all videos have started loading
   let loadedCount = 0;
@@ -599,6 +676,7 @@ async function renderMultiCameraGrid(epIdx) {
 function hideMultiCameraGrid() {
   multiVideoGrid.innerHTML = '';
   multiVideoGrid.style.display = 'none';
+  multiVideoControls.style.display = 'none';
 }
 
 async function selectEpisode(epIdx) {

@@ -79,6 +79,11 @@
 
         <div class="video-shell">
           <video id="episodeVideo" controls preload="metadata" style="display:none;"></video>
+          <div id="multiVideoControls" class="multi-video-controls" style="display:none;">
+            <button id="multiPlayPause" class="multi-pp-btn" type="button" aria-label="Play/Pause">&#9654;</button>
+            <input id="multiSeek" class="multi-seek" type="range" min="0" max="1000" value="0" step="1" />
+            <span id="multiTimeDisplay" class="multi-time">00:00.000 / 00:00.000</span>
+          </div>
           <div id="multiVideoGrid" class="video-grid" style="display:none;"></div>
           <div id="episodeVideoLoading" class="video-loading" style="display:none;">
             <div class="spinner"></div>
