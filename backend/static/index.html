@@ -185,15 +185,23 @@
                 End (s)
                 <input id="taskEnd" type="number" step="0.001" />
               </label>
+              <label>
+                Start frame
+                <input id="taskStartFrame" type="number" step="1" />
+              </label>
+              <label>
+                End frame
+                <input id="taskEndFrame" type="number" step="1" />
+              </label>
               <label class="grow">
-                Task name
+                Task label
                 <input id="taskName" type="text" placeholder="pick up block" />
               </label>
             </div>
             <div class="row">
               <button id="taskSetStart" class="ghost" type="button">Set start from video</button>
               <button id="taskSetEnd" class="ghost" type="button">Set end from video</button>
-              <button id="addTask" class="primary" type="button">Add task</button>
+              <button id="addTask" class="primary" type="button">Set task</button>
             </div>
           </div>
           <div id="taskList" class="segment-list"></div>

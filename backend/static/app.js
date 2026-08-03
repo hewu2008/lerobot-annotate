@@ -174,6 +174,8 @@ const highLevelList = document.getElementById('highLevelList');
 
 const taskStart = document.getElementById('taskStart');
 const taskEnd = document.getElementById('taskEnd');
+const taskStartFrame = document.getElementById('taskStartFrame');
+const taskEndFrame = document.getElementById('taskEndFrame');
 const taskName = document.getElementById('taskName');
 const taskSetStart = document.getElementById('taskSetStart');
 const taskSetEnd = document.getElementById('taskSetEnd');
@@ -328,7 +330,24 @@ function resetEpisodeForm() {
   hlResponse.value = '';
   taskStart.value = '';
   taskEnd.value = '';
+  taskStartFrame.value = '';
+  taskEndFrame.value = '';
   taskName.value = '';
+}
+
+function currentFrame() {
+  if (!state.dataset || !state.dataset.fps) return 0;
+  return Math.round(currentTime() * state.dataset.fps);
+}
+
+function secondsToFrame(sec) {
+  if (!state.dataset || !state.dataset.fps) return 0;
+  return Math.round(Number(sec) * state.dataset.fps);
+}
+
+function frameToSeconds(frame) {
+  if (!state.dataset || !state.dataset.fps) return 0;
+  return Number(frame) / state.dataset.fps;
 }
 
 function getEpisodeAnnotations(epIdx) {
@@ -576,9 +595,12 @@ function renderTasks() {
     taskMap[name] = idx;
   });
 
+  const fps = state.dataset?.fps || 30;
+
   ann.tasks.forEach((seg, idx) => {
     const row = document.createElement('div');
     row.className = 'segment-item';
+    row.style.gridTemplateColumns = '36px 80px 80px 70px 70px 1fr auto';
 
     const indexBadge = document.createElement('span');
     const taskIndex = taskMap[seg.name] ?? '?';
@@ -590,21 +612,52 @@ function renderTasks() {
     startInput.type = 'number';
     startInput.step = '0.001';
     startInput.value = seg.start;
+    startInput.title = 'Start (s)';
     startInput.addEventListener('change', () => {
       seg.start = Number(startInput.value);
+      renderTasks();
     });
 
     const endInput = document.createElement('input');
     endInput.type = 'number';
     endInput.step = '0.001';
     endInput.value = seg.end;
+    endInput.title = 'End (s)';
     endInput.addEventListener('change', () => {
       seg.end = Number(endInput.value);
+      renderTasks();
+    });
+
+    const startFrameInput = document.createElement('input');
+    startFrameInput.type = 'number';
+    startFrameInput.step = '1';
+    startFrameInput.value = Math.round(Number(seg.start) * fps);
+    startFrameInput.title = 'Start frame';
+    startFrameInput.addEventListener('change', () => {
+      const f = Number(startFrameInput.value);
+      if (!Number.isNaN(f)) {
+        seg.start = f / fps;
+        renderTasks();
+      }
+    });
+
+    const endFrameInput = document.createElement('input');
+    endFrameInput.type = 'number';
+    endFrameInput.step = '1';
+    endFrameInput.value = Math.round(Number(seg.end) * fps);
+    endFrameInput.title = 'End frame';
+    endFrameInput.addEventListener('change', () => {
+      const f = Number(endFrameInput.value);
+      if (!Number.isNaN(f)) {
+        seg.end = f / fps;
+        renderTasks();
+      }
     });
 
     const nameInput = document.createElement('input');
     nameInput.type = 'text';
     nameInput.value = seg.name;
+    nameInput.title = 'Task label';
     nameInput.addEventListener('change', () => {
       seg.name = nameInput.value;
       renderTasks();
@@ -621,6 +674,8 @@ function renderTasks() {
     row.appendChild(indexBadge);
     row.appendChild(startInput);
     row.appendChild(endInput);
+    row.appendChild(startFrameInput);
+    row.appendChild(endFrameInput);
     row.appendChild(nameInput);
     row.appendChild(deleteBtn);
 
@@ -818,6 +873,32 @@ async function selectEpisode(epIdx) {
   }
   
   resetEpisodeForm();
+
+  // Default task start/end to full episode duration, and task label from episodes.jsonl
+  const epData = state.currentEpisodeData;
+  if (epData) {
+    const fps = state.dataset?.fps || 30;
+    const fullStart = 0;
+    const fullEnd = epData.duration || 0;
+    const fullStartFrame = 0;
+    const fullEndFrame = epData.length || (fps > 0 ? Math.round(fullEnd * fps) : 0);
+
+    // Pre-fill task label from episodes.jsonl if available
+    const taskLabelFromMeta = epData.task_label || epData.task_name || epData.task || '';
+    if (taskLabelFromMeta) {
+      taskName.value = typeof taskLabelFromMeta === 'string' ? taskLabelFromMeta : '';
+    }
+
+    // If tasks annotations list is empty, pre-fill the form with full episode defaults
+    const ann = state.annotations[epIdx];
+    if (!ann.tasks || ann.tasks.length === 0) {
+      taskStart.value = Number(fullStart).toFixed(3);
+      taskEnd.value = Number(fullEnd).toFixed(3);
+      taskStartFrame.value = fullStartFrame;
+      taskEndFrame.value = fullEndFrame;
+    }
+  }
+
   renderEpisodes();
   renderSubtasks();
   renderHighLevels();
@@ -970,10 +1051,38 @@ addHighLevel.addEventListener('click', () => {
 
 taskSetStart.addEventListener('click', () => {
   taskStart.value = currentTime();
+  taskStartFrame.value = currentFrame();
 });
 
 taskSetEnd.addEventListener('click', () => {
   taskEnd.value = currentTime();
+  taskEndFrame.value = currentFrame();
+});
+
+// Two-way sync between seconds and frames for task form
+taskStart.addEventListener('input', () => {
+  const sec = Number(taskStart.value);
+  if (!Number.isNaN(sec) && state.dataset?.fps) {
+    taskStartFrame.value = Math.round(sec * state.dataset.fps);
+  }
+});
+taskStartFrame.addEventListener('input', () => {
+  const frame = Number(taskStartFrame.value);
+  if (!Number.isNaN(frame) && state.dataset?.fps) {
+    taskStart.value = (frame / state.dataset.fps).toFixed(3);
+  }
+});
+taskEnd.addEventListener('input', () => {
+  const sec = Number(taskEnd.value);
+  if (!Number.isNaN(sec) && state.dataset?.fps) {
+    taskEndFrame.value = Math.round(sec * state.dataset.fps);
+  }
+});
+taskEndFrame.addEventListener('input', () => {
+  const frame = Number(taskEndFrame.value);
+  if (!Number.isNaN(frame) && state.dataset?.fps) {
+    taskEnd.value = (frame / state.dataset.fps).toFixed(3);
+  }
 });
 
 addTask.addEventListener('click', () => {
@@ -985,9 +1094,9 @@ addTask.addEventListener('click', () => {
     return;
   }
   const ann = getEpisodeAnnotations(state.currentEpisode);
-  ann.tasks.push({ start, end, name });
+  // "Set task" behavior: replace existing tasks with the new one (single task per episode)
+  ann.tasks = [{ start, end, name }];
   renderTasks();
-  taskName.value = '';
 });
 
 saveEpisodeBtn.addEventListener('click', () => saveEpisode());

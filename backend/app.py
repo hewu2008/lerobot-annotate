@@ -323,15 +323,22 @@ class DataManager:
             # Get video timing info for this episode
             video_info = episode_video_offsets.get(ep_idx, {"video_start_time": 0.0, "video_end_time": duration})
             
-            episodes.append(
-                {
-                    "episode_index": ep_idx,
-                    "length": length,
-                    "duration": duration,
-                    "video_start_time": video_info["video_start_time"],
-                    "video_end_time": video_info["video_end_time"],
-                }
-            )
+            ep_entry = {
+                "episode_index": ep_idx,
+                "length": length,
+                "duration": duration,
+                "video_start_time": video_info["video_start_time"],
+                "video_end_time": video_info["video_end_time"],
+            }
+            # Pass through any task/task_label/tasks columns from episodes.jsonl
+            for col in ("task", "task_label", "tasks", "task_name"):
+                if col in row and pd.notna(row[col]):
+                    val = row[col]
+                    if isinstance(val, (list, dict)):
+                        ep_entry[col] = val
+                    else:
+                        ep_entry[col] = str(val)
+            episodes.append(ep_entry)
         return {
             "source": self.source,
             "repo_id": self.repo_id,
