@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from pydantic import BaseModel
 
-from lerobot_converter import process_dataset_with_annotations
+from .lerobot_converter import process_dataset_with_annotations
 
 APP_ROOT = Path(__file__).resolve().parent
 STATIC_DIR = APP_ROOT / "static"
