@@ -1,5 +1,23 @@
 console.log('[App] Script starting...');
 
+let toastContainer = null;
+function showToast(message, type = 'success', duration = 2500) {
+  if (!toastContainer) {
+    toastContainer = document.createElement('div');
+    toastContainer.className = 'toast-container';
+    document.body.appendChild(toastContainer);
+  }
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  const iconMap = { success: '✓', error: '✗', info: 'ℹ' };
+  toast.innerHTML = `<span class="toast-icon">${iconMap[type] || 'ℹ'}</span><span>${message}</span>`;
+  toastContainer.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
 
 function showPushStatus(type, message, url = null) {
   console.log('[Push to Hub] Showing status:', type, message);
@@ -180,7 +198,6 @@ const taskName = document.getElementById('taskName');
 const taskSetStart = document.getElementById('taskSetStart');
 const taskSetEnd = document.getElementById('taskSetEnd');
 const addTask = document.getElementById('addTask');
-const taskList = document.getElementById('taskList');
 
 const exportBtn = document.getElementById('exportBtn');
 const outputDir = document.getElementById('outputDir');
@@ -575,112 +592,8 @@ function renderHighLevels() {
 }
 
 function renderTasks() {
-  taskList.innerHTML = '';
-  if (state.currentEpisode == null) return;
-  const ann = getEpisodeAnnotations(state.currentEpisode);
-  ann.tasks.sort((a, b) => a.start - b.start);
-
-  // Build task index map based on all annotations (consistent with export)
-  const taskMap = {};
-  const allNames = new Set();
-  for (const epAnn of Object.values(state.annotations)) {
-    for (const seg of epAnn.tasks || []) {
-      if (seg.name) {
-        allNames.add(seg.name);
-      }
-    }
-  }
-  const sortedNames = Array.from(allNames).sort();
-  sortedNames.forEach((name, idx) => {
-    taskMap[name] = idx;
-  });
-
-  const fps = state.dataset?.fps || 30;
-
-  ann.tasks.forEach((seg, idx) => {
-    const row = document.createElement('div');
-    row.className = 'segment-item';
-    row.style.gridTemplateColumns = '36px 80px 80px 70px 70px 1fr auto';
-
-    const indexBadge = document.createElement('span');
-    const taskIndex = taskMap[seg.name] ?? '?';
-    indexBadge.textContent = taskIndex;
-    indexBadge.title = `task_index: ${taskIndex}`;
-    indexBadge.style.cssText = 'display: flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; background: var(--accent-2); color: #0b0e14; border-radius: 6px; font-weight: 600; font-size: 12px;';
-
-    const startInput = document.createElement('input');
-    startInput.type = 'number';
-    startInput.step = '0.001';
-    startInput.value = seg.start;
-    startInput.title = 'Start (s)';
-    startInput.addEventListener('change', () => {
-      seg.start = Number(startInput.value);
-      renderTasks();
-    });
-
-    const endInput = document.createElement('input');
-    endInput.type = 'number';
-    endInput.step = '0.001';
-    endInput.value = seg.end;
-    endInput.title = 'End (s)';
-    endInput.addEventListener('change', () => {
-      seg.end = Number(endInput.value);
-      renderTasks();
-    });
-
-    const startFrameInput = document.createElement('input');
-    startFrameInput.type = 'number';
-    startFrameInput.step = '1';
-    startFrameInput.value = Math.round(Number(seg.start) * fps);
-    startFrameInput.title = 'Start frame';
-    startFrameInput.addEventListener('change', () => {
-      const f = Number(startFrameInput.value);
-      if (!Number.isNaN(f)) {
-        seg.start = f / fps;
-        renderTasks();
-      }
-    });
-
-    const endFrameInput = document.createElement('input');
-    endFrameInput.type = 'number';
-    endFrameInput.step = '1';
-    endFrameInput.value = Math.round(Number(seg.end) * fps);
-    endFrameInput.title = 'End frame';
-    endFrameInput.addEventListener('change', () => {
-      const f = Number(endFrameInput.value);
-      if (!Number.isNaN(f)) {
-        seg.end = f / fps;
-        renderTasks();
-      }
-    });
-
-    const nameInput = document.createElement('input');
-    nameInput.type = 'text';
-    nameInput.value = seg.name;
-    nameInput.title = 'Task label';
-    nameInput.addEventListener('change', () => {
-      seg.name = nameInput.value;
-      renderTasks();
-    });
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'ghost';
-    deleteBtn.textContent = 'Delete';
-    deleteBtn.addEventListener('click', () => {
-      ann.tasks.splice(idx, 1);
-      renderTasks();
-    });
-
-    row.appendChild(indexBadge);
-    row.appendChild(startInput);
-    row.appendChild(endInput);
-    row.appendChild(startFrameInput);
-    row.appendChild(endFrameInput);
-    row.appendChild(nameInput);
-    row.appendChild(deleteBtn);
-
-    taskList.appendChild(row);
-  });
+  // Task annotation is now displayed inline in the form, not as a list.
+  // Kept as no-op for compatibility.
 }
 
 async function renderMultiCameraGrid(epIdx) {
@@ -874,7 +787,7 @@ async function selectEpisode(epIdx) {
   
   resetEpisodeForm();
 
-  // Default task start/end to full episode duration, and task label from episodes.jsonl
+  // Populate task form directly from annotations (inline, not list)
   const epData = state.currentEpisodeData;
   if (epData) {
     const fps = state.dataset?.fps || 30;
@@ -893,28 +806,33 @@ async function selectEpisode(epIdx) {
         taskLabelFromMeta = epData.tasks;
       }
     }
-    if (taskLabelFromMeta) {
-      taskName.value = typeof taskLabelFromMeta === 'string' ? taskLabelFromMeta : '';
-    }
 
-    // If tasks annotations list is empty, pre-fill the form with full episode defaults
     const ann = state.annotations[epIdx];
-    if (!ann.tasks || ann.tasks.length === 0) {
+    if (ann.tasks && ann.tasks.length > 0) {
+      // Show existing task annotation directly in form fields
+      const t = ann.tasks[0];
+      taskStart.value = Number(t.start).toFixed(3);
+      taskEnd.value = Number(t.end).toFixed(3);
+      taskStartFrame.value = Math.round(Number(t.start) * fps);
+      taskEndFrame.value = Math.round(Number(t.end) * fps);
+      taskName.value = t.name || (taskLabelFromMeta || '');
+    } else {
+      // No task yet: pre-fill with full episode defaults and label from metadata
       taskStart.value = Number(fullStart).toFixed(3);
       taskEnd.value = Number(fullEnd).toFixed(3);
       taskStartFrame.value = fullStartFrame;
       taskEndFrame.value = fullEndFrame;
+      taskName.value = taskLabelFromMeta || '';
     }
   }
 
   renderEpisodes();
   renderSubtasks();
   renderHighLevels();
-  renderTasks();
 }
 
 async function saveEpisode() {
-  if (state.currentEpisode == null) return;
+  if (state.currentEpisode == null) return false;
   const ann = getEpisodeAnnotations(state.currentEpisode);
   const payload = {
     episode_index: state.currentEpisode,
@@ -953,12 +871,14 @@ async function saveEpisode() {
       saveStatus.textContent = '✓ Episode saved';
       saveStatus.style.color = '#22c55e';
     }
+    return true;
   } catch (err) {
     console.error('[Save Episode] Error:', err);
     if (saveStatus) {
       saveStatus.textContent = '✗ ' + (err.message || 'Save failed');
       saveStatus.style.color = '#ef4444';
     }
+    return false;
   } finally {
     btnEl.disabled = false;
     btnEl.textContent = 'Save episode';
@@ -1136,7 +1056,12 @@ addTask.addEventListener('click', async () => {
   }
   const ann = getEpisodeAnnotations(state.currentEpisode);
   ann.tasks = [{ start, end, name }];
-  await saveEpisode();
+  const ok = await saveEpisode();
+  if (ok) {
+    showToast('Task saved successfully', 'success');
+  } else {
+    showToast('Failed to save task', 'error');
+  }
 });
 
 saveEpisodeBtn.addEventListener('click', () => saveEpisode());
@@ -1145,8 +1070,16 @@ resetEpisodeBtn.addEventListener('click', () => {
   state.annotations[state.currentEpisode] = { subtasks: [], high_levels: [], tasks: [] };
   renderSubtasks();
   renderHighLevels();
-  renderTasks();
   renderTimeline();
+  // Reset task form to episode defaults
+  const epData = state.currentEpisodeData;
+  if (epData) {
+    const fps = state.dataset?.fps || 30;
+    taskStart.value = Number(0).toFixed(3);
+    taskEnd.value = Number(epData.duration || 0).toFixed(3);
+    taskStartFrame.value = 0;
+    taskEndFrame.value = epData.length || (fps > 0 ? Math.round((epData.duration || 0) * fps) : 0);
+  }
 });
 
 episodeSearch.addEventListener('input', renderEpisodes);
