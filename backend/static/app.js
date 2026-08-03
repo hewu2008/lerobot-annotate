@@ -413,7 +413,44 @@ function renderEpisodes() {
       li.classList.add('annotated');
       li.title = 'Annotated';
     }
-    li.addEventListener('click', () => selectEpisode(ep.episode_index));
+    li.addEventListener('click', (e) => {
+      if (e.target.classList.contains('episode-delete-btn')) return;
+      selectEpisode(ep.episode_index);
+    });
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'episode-delete-btn';
+    deleteBtn.textContent = '✕';
+    deleteBtn.title = `Delete episode ${ep.episode_index}`;
+    deleteBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const confirmed = confirm(`Delete episode ${ep.episode_index}? This will remove all annotations and exclude it from export.`);
+      if (!confirmed) return;
+      try {
+        const res = await fetch(`/api/episodes/${ep.episode_index}`, {
+          method: 'DELETE',
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.detail || 'Failed to delete episode');
+        }
+        showToast(`Episode ${ep.episode_index} deleted`, 'success');
+        state.episodes = state.episodes.filter(e => e.episode_index !== ep.episode_index);
+        if (state.currentEpisode === ep.episode_index) {
+          state.currentEpisode = null;
+          state.currentEpisodeData = null;
+          episodeTitle.textContent = 'Select an episode';
+          episodeMeta.textContent = '';
+          resetEpisodeForm();
+        }
+        renderEpisodes();
+        renderLabelChips();
+      } catch (err) {
+        showToast(err.message || 'Delete failed', 'error');
+      }
+    });
+    li.appendChild(deleteBtn);
+
     episodeList.appendChild(li);
   });
 }

@@ -171,6 +171,7 @@ class DataManager:
         self.video_key: str | None = None
         self.annotations: dict[int, EpisodeAnnotations] = {}
         self.annotations_path: Path | None = None
+        self.deleted_episodes: set[int] = set()
 
     def load_dataset(self, req: DatasetLoadRequest) -> dict[str, Any]:
         if req.source not in {"hf", "local"}:
@@ -265,6 +266,7 @@ class DataManager:
 
     def _load_existing_annotations(self) -> None:
         self.annotations = {}
+        self.deleted_episodes = set()
         if self.annotations_path and self.annotations_path.exists():
             data = json.loads(self.annotations_path.read_text())
             for ep_str, payload in data.get("episodes", {}).items():
@@ -274,6 +276,8 @@ class DataManager:
                     high_levels=payload.get("high_levels", []),
                     tasks=payload.get("tasks", []),
                 )
+            for ep_str in data.get("deleted_episodes", []):
+                self.deleted_episodes.add(int(ep_str))
             return
 
         # Fall back to skills.json if present
@@ -304,6 +308,7 @@ class DataManager:
                     }
                     for ep_idx, ann in self.annotations.items()
                 },
+                "deleted_episodes": sorted(self.deleted_episodes),
             }
             self.annotations_path.parent.mkdir(parents=True, exist_ok=True)
             self.annotations_path.write_text(json.dumps(payload, indent=2))
@@ -321,9 +326,11 @@ class DataManager:
         
         episodes = []
         for _, row in self.episodes_df.iterrows():
+            ep_idx = int(row["episode_index"])
+            if ep_idx in self.deleted_episodes:
+                continue
             length = int(row.get("length", row.get("dataset_to_index", 0) - row.get("dataset_from_index", 0)))
             duration = length / fps if fps else 0.0
-            ep_idx = int(row["episode_index"])
             
             # Get video timing info for this episode
             video_info = episode_video_offsets.get(ep_idx, {"video_start_time": 0.0, "video_end_time": duration})
@@ -567,6 +574,17 @@ class DataManager:
         self._save_annotations()
         print(f"[Set Annotations] Saved annotations for episode {payload.episode_index}")
 
+    def delete_episode(self, episode_index: int) -> None:
+        if self.episodes_df is None:
+            raise HTTPException(status_code=400, detail="Dataset not loaded")
+        row = self.episodes_df[self.episodes_df["episode_index"] == episode_index]
+        if row.empty:
+            raise HTTPException(status_code=404, detail=f"Episode {episode_index} not found")
+        self.deleted_episodes.add(episode_index)
+        self.annotations.pop(episode_index, None)
+        self._save_annotations()
+        print(f"[Delete Episode] Deleted episode {episode_index}")
+
     def export_dataset(self, output_dir: str | None = None, copy_videos: bool = False) -> dict[str, Any]:
         if self.dataset_root is None or self.info is None:
             raise HTTPException(status_code=400, detail="Dataset not loaded")
@@ -586,6 +604,32 @@ class DataManager:
         if dst_meta.exists():
             shutil.rmtree(dst_meta)
         shutil.copytree(src_meta, dst_meta)
+
+        # Filter deleted episodes from metadata
+        if self.deleted_episodes:
+            # Filter episodes.jsonl if present
+            episodes_jsonl = dst_meta / "episodes.jsonl"
+            if episodes_jsonl.exists():
+                records = []
+                with open(episodes_jsonl) as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            rec = json.loads(line)
+                            if int(rec.get("episode_index", -1)) not in self.deleted_episodes:
+                                records.append(rec)
+                with open(episodes_jsonl, "w") as f:
+                    for rec in records:
+                        f.write(json.dumps(rec) + "\n")
+
+            # Filter episodes parquet if present
+            episodes_dir = dst_meta / "episodes"
+            if episodes_dir.is_dir():
+                for pq_file in episodes_dir.rglob("*.parquet"):
+                    ep_df = pd.read_parquet(pq_file)
+                    if "episode_index" in ep_df.columns:
+                        ep_df = ep_df[~ep_df["episode_index"].isin(self.deleted_episodes)]
+                        ep_df.to_parquet(pq_file, engine="pyarrow", compression="snappy", index=False)
 
         subtasks_df, subtask_map = build_subtasks_dataframe(self.annotations)
         tasks_df, task_map = build_high_level_dataframe(self.annotations)
@@ -628,6 +672,11 @@ class DataManager:
             dst_path.parent.mkdir(parents=True, exist_ok=True)
 
             df = pd.read_parquet(src_path)
+
+            # Filter out deleted episodes
+            if self.deleted_episodes:
+                df = df[~df["episode_index"].isin(self.deleted_episodes)]
+
             df["subtask_index"] = -1
             df["task_index_high_level"] = -1
             df["task_index"] = -1
@@ -831,6 +880,12 @@ def set_annotations(episode_index: int, payload: EpisodeAnnotationsPayload) -> J
     if episode_index != payload.episode_index:
         raise HTTPException(status_code=400, detail="Episode index mismatch")
     manager.set_episode_annotations(payload)
+    return JSONResponse({"ok": True})
+
+
+@app.delete("/api/episodes/{episode_index}")
+def delete_episode(episode_index: int) -> JSONResponse:
+    manager.delete_episode(episode_index)
     return JSONResponse({"ok": True})
 
 
