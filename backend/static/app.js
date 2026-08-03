@@ -137,9 +137,11 @@ const episodeSearch = document.getElementById('episodeSearch');
 const episodeTitle = document.getElementById('episodeTitle');
 const episodeMeta = document.getElementById('episodeMeta');
 const episodeVideo = document.getElementById('episodeVideo');
+const multiVideoGrid = document.getElementById('multiVideoGrid');
 const episodeVideoLoading = document.getElementById('episodeVideoLoading');
 const noVideoMessage = document.getElementById('noVideoMessage');
 const timeline = document.getElementById('timeline');
+const showAllVideos = document.getElementById('showAllVideos');
 
 const saveEpisodeBtn = document.getElementById('saveEpisode');
 const resetEpisodeBtn = document.getElementById('resetEpisode');
@@ -175,6 +177,13 @@ videoKeySelect.addEventListener('change', () => {
     if (state.currentEpisode !== null) {
       selectEpisode(state.currentEpisode);
     }
+  }
+});
+
+// Toggle multi-camera display
+showAllVideos.addEventListener('change', () => {
+  if (state.dataset && state.currentEpisode !== null) {
+    selectEpisode(state.currentEpisode);
   }
 });
 const exportStatus = document.getElementById('exportStatus');
@@ -224,14 +233,22 @@ function formatDuration(seconds) {
   return `${mins}m ${secs}s`;
 }
 
+function getPrimaryVideoElement() {
+  if (showAllVideos.checked && multiVideoGrid.style.display !== 'none') {
+    return multiVideoGrid.querySelector('.video-grid-item.is-primary video');
+  }
+  return episodeVideo;
+}
+
 function currentTime() {
-  // The server now returns trimmed videos, so currentTime is the actual episode time
-  // Use 3 decimal places for millisecond precision
   if (!state.dataset || !state.dataset.selected_video_key) {
-    // No video available, return 0 as default
     return 0;
   }
-  return Number(episodeVideo.currentTime.toFixed(3));
+  const video = getPrimaryVideoElement();
+  if (!video || video.style.display === 'none') {
+    return 0;
+  }
+  return Number(video.currentTime.toFixed(3));
 }
 
 function formatTimeWithMs(seconds) {
@@ -247,7 +264,6 @@ function updateTimeDisplay() {
   const currentTimeDisplay = document.getElementById('currentTimeDisplay');
   const totalTimeDisplay = document.getElementById('totalTimeDisplay');
   if (!state.dataset || !state.dataset.selected_video_key) {
-    // No video available, use episode data
     if (currentTimeDisplay) {
       currentTimeDisplay.textContent = '00:00.000';
     }
@@ -256,24 +272,24 @@ function updateTimeDisplay() {
     }
     return;
   }
-  if (currentTimeDisplay) {
-    currentTimeDisplay.textContent = formatTimeWithMs(episodeVideo.currentTime);
+  const video = getPrimaryVideoElement();
+  if (currentTimeDisplay && video) {
+    currentTimeDisplay.textContent = formatTimeWithMs(video.currentTime);
   }
-  if (totalTimeDisplay && episodeVideo.duration) {
-    totalTimeDisplay.textContent = formatTimeWithMs(episodeVideo.duration);
+  if (totalTimeDisplay && video && video.duration) {
+    totalTimeDisplay.textContent = formatTimeWithMs(video.duration);
   }
 }
 
 function getEpisodeDuration() {
-  // The server returns trimmed videos, so video duration = episode duration
-  // When no video is available, use the episode duration from the dataset
   if (!state.dataset || !state.dataset.selected_video_key) {
     if (state.currentEpisodeData && state.currentEpisodeData.duration) {
       return state.currentEpisodeData.duration;
     }
     return 0;
   }
-  return episodeVideo.duration || 0;
+  const video = getPrimaryVideoElement();
+  return video ? (video.duration || 0) : 0;
 }
 
 function resetEpisodeForm() {
@@ -513,6 +529,78 @@ function renderHighLevels() {
   });
 }
 
+async function renderMultiCameraGrid(epIdx) {
+  const videoKeys = state.dataset?.video_keys || [];
+  if (!videoKeys.length) return;
+
+  multiVideoGrid.innerHTML = '';
+  multiVideoGrid.style.display = '';
+  episodeVideo.style.display = 'none';
+  episodeVideoLoading.style.display = '';
+
+  const primaryKey = state.dataset.selected_video_key;
+  let primaryVideo = null;
+
+  videoKeys.forEach(key => {
+    const item = document.createElement('div');
+    item.className = 'video-grid-item';
+    if (key === primaryKey) item.classList.add('is-primary');
+
+    const label = document.createElement('div');
+    label.className = 'video-label';
+    let labelText = key;
+    if (key.startsWith('observation.images.')) {
+      labelText = key.replace('observation.images.', '');
+    } else if (key.startsWith('videos/')) {
+      labelText = key.replace('videos/', '');
+    }
+    label.textContent = labelText;
+
+    const video = document.createElement('video');
+    video.controls = true;
+    video.preload = 'metadata';
+    video.src = `/api/video/${epIdx}?video_key=${encodeURIComponent(key)}`;
+    video.muted = key !== primaryKey;
+
+    item.appendChild(video);
+    item.appendChild(label);
+    multiVideoGrid.appendChild(item);
+
+    if (key === primaryKey) {
+      primaryVideo = video;
+      // Attach event listeners to primary video
+      video.addEventListener('loadedmetadata', () => {
+        renderTimeline();
+        updateTimeDisplay();
+      });
+      video.addEventListener('timeupdate', updateTimeDisplay);
+    }
+  });
+
+  // Hide loading when all videos have started loading
+  let loadedCount = 0;
+  const totalVideos = videoKeys.length;
+  multiVideoGrid.querySelectorAll('video').forEach(v => {
+    v.addEventListener('loadeddata', () => {
+      loadedCount++;
+      if (loadedCount >= totalVideos) {
+        episodeVideoLoading.style.display = 'none';
+      }
+    }, { once: true });
+    v.addEventListener('error', () => {
+      loadedCount++;
+      if (loadedCount >= totalVideos) {
+        episodeVideoLoading.style.display = 'none';
+      }
+    }, { once: true });
+  });
+}
+
+function hideMultiCameraGrid() {
+  multiVideoGrid.innerHTML = '';
+  multiVideoGrid.style.display = 'none';
+}
+
 async function selectEpisode(epIdx) {
   state.currentEpisode = epIdx;
   episodeTitle.textContent = `Episode ${epIdx}`;
@@ -529,17 +617,25 @@ async function selectEpisode(epIdx) {
 
   // Load video only if the dataset has video keys
   if (state.dataset && state.dataset.selected_video_key) {
-    const videoUrl = `/api/video/${epIdx}?video_key=${encodeURIComponent(state.dataset.selected_video_key)}`;
-    console.log(`Loading episode ${epIdx} video`);
-    episodeVideo.src = videoUrl;
-    episodeVideo.style.display = '';
     noVideoMessage.style.display = 'none';
-    episodeVideoLoading.style.display = '';
-    episodeVideo.addEventListener('loadeddata', () => {
-      episodeVideoLoading.style.display = 'none';
-    }, { once: true });
+
+    if (showAllVideos.checked && state.dataset.video_keys.length > 1) {
+      episodeVideo.style.display = 'none';
+      await renderMultiCameraGrid(epIdx);
+    } else {
+      hideMultiCameraGrid();
+      const videoUrl = `/api/video/${epIdx}?video_key=${encodeURIComponent(state.dataset.selected_video_key)}`;
+      console.log(`Loading episode ${epIdx} video`);
+      episodeVideo.src = videoUrl;
+      episodeVideo.style.display = '';
+      episodeVideoLoading.style.display = '';
+      episodeVideo.addEventListener('loadeddata', () => {
+        episodeVideoLoading.style.display = 'none';
+      }, { once: true });
+    }
   } else {
     // No video available for this dataset
+    hideMultiCameraGrid();
     episodeVideo.removeAttribute('src');
     episodeVideo.load();
     episodeVideo.style.display = 'none';
@@ -598,6 +694,7 @@ connectForm.addEventListener('submit', async (event) => {
     setHelper(connectHelper, `Loaded ${state.episodes.length} episodes.`, true);
     workspace.style.display = 'grid';
     populateVideoKeys(data.video_keys, data.selected_video_key);
+    hideMultiCameraGrid();
     // Show no-video message if dataset has no video
     if (data.selected_video_key) {
       noVideoMessage.style.display = 'none';
