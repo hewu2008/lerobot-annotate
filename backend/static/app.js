@@ -923,10 +923,11 @@ async function saveEpisode() {
     tasks: ann.tasks,
   };
 
+  const btnEl = document.getElementById('saveEpisode');
   const saveStatus = document.getElementById('saveStatus');
 
-  saveEpisodeBtn.disabled = true;
-  saveEpisodeBtn.textContent = 'Saving...';
+  btnEl.disabled = true;
+  btnEl.textContent = 'Saving...';
   if (saveStatus) {
     saveStatus.textContent = 'Saving...';
     saveStatus.style.color = '#f97316';
@@ -959,8 +960,8 @@ async function saveEpisode() {
       saveStatus.style.color = '#ef4444';
     }
   } finally {
-    saveEpisodeBtn.disabled = false;
-    saveEpisodeBtn.textContent = 'Save episode';
+    btnEl.disabled = false;
+    btnEl.textContent = 'Save episode';
   }
 }
 
@@ -1125,7 +1126,7 @@ taskEndFrame.addEventListener('input', () => {
   }
 });
 
-addTask.addEventListener('click', () => {
+addTask.addEventListener('click', async () => {
   if (state.currentEpisode == null) return;
   const start = Number(taskStart.value);
   const end = Number(taskEnd.value);
@@ -1134,9 +1135,8 @@ addTask.addEventListener('click', () => {
     return;
   }
   const ann = getEpisodeAnnotations(state.currentEpisode);
-  // "Set task" behavior: replace existing tasks with the new one (single task per episode)
   ann.tasks = [{ start, end, name }];
-  renderTasks();
+  await saveEpisode();
 });
 
 saveEpisodeBtn.addEventListener('click', () => saveEpisode());
