@@ -292,19 +292,23 @@ class DataManager:
     def _save_annotations(self) -> None:
         if not self.annotations_path:
             return
-        payload = {
-            "version": 1,
-            "episodes": {
-                str(ep_idx): {
-                    "subtasks": ann.subtasks,
-                    "high_levels": ann.high_levels,
-                    "tasks": ann.tasks,
-                }
-                for ep_idx, ann in self.annotations.items()
-            },
-        }
-        self.annotations_path.parent.mkdir(parents=True, exist_ok=True)
-        self.annotations_path.write_text(json.dumps(payload, indent=2))
+        try:
+            payload = {
+                "version": 1,
+                "episodes": {
+                    str(ep_idx): {
+                        "subtasks": ann.subtasks,
+                        "high_levels": ann.high_levels,
+                        "tasks": ann.tasks,
+                    }
+                    for ep_idx, ann in self.annotations.items()
+                },
+            }
+            self.annotations_path.parent.mkdir(parents=True, exist_ok=True)
+            self.annotations_path.write_text(json.dumps(payload, indent=2))
+        except Exception as e:
+            print(f"[Save Annotations] Error saving annotations: {e}")
+            raise
 
     def _build_summary(self) -> dict[str, Any]:
         assert self.info and self.episodes_df is not None
@@ -551,12 +555,16 @@ class DataManager:
         return self.annotations[episode_index]
 
     def set_episode_annotations(self, payload: EpisodeAnnotationsPayload) -> None:
+        print(f"[Set Annotations] Episode {payload.episode_index}: subtasks={len(payload.subtasks)}, high_levels={len(payload.high_levels)}, tasks={len(payload.tasks)}")
+        for t in payload.tasks:
+            print(f"[Set Annotations]   task: start={t.start}, end={t.end}, name={t.name}")
         self.annotations[payload.episode_index] = EpisodeAnnotations(
             subtasks=[seg.dict() for seg in payload.subtasks],
             high_levels=[seg.dict() for seg in payload.high_levels],
             tasks=[seg.dict() for seg in payload.tasks],
         )
         self._save_annotations()
+        print(f"[Set Annotations] Saved annotations for episode {payload.episode_index}")
 
     def export_dataset(self, output_dir: str | None = None, copy_videos: bool = False) -> dict[str, Any]:
         if self.dataset_root is None or self.info is None:

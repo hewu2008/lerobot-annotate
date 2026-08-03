@@ -180,6 +180,23 @@ button:hover {
   align-items: center;
 }
 
+.viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.save-status {
+  font-size: 0.85rem;
+  font-weight: 500;
+  min-width: 120px;
+  text-align: right;
+}
+
+.save-status:empty {
+  display: none;
+}
+
 .muted {
   color: var(--muted);
   margin: 4px 0 0;

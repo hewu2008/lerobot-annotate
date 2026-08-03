@@ -922,13 +922,45 @@ async function saveEpisode() {
     high_levels: ann.high_levels,
     tasks: ann.tasks,
   };
-  const res = await fetch(`/api/episodes/${state.currentEpisode}/annotations`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (res.ok) {
-    setHelper(connectHelper, 'Episode saved.', true);
+
+  const saveStatus = document.getElementById('saveStatus');
+
+  saveEpisodeBtn.disabled = true;
+  saveEpisodeBtn.textContent = 'Saving...';
+  if (saveStatus) {
+    saveStatus.textContent = 'Saving...';
+    saveStatus.style.color = '#f97316';
+  }
+
+  try {
+    const res = await fetch(`/api/episodes/${state.currentEpisode}/annotations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      let errorMsg = 'Save failed';
+      try {
+        const errData = await res.json();
+        errorMsg = errData.detail || errorMsg;
+      } catch (_) {}
+      throw new Error(errorMsg);
+    }
+
+    if (saveStatus) {
+      saveStatus.textContent = '✓ Episode saved';
+      saveStatus.style.color = '#22c55e';
+    }
+  } catch (err) {
+    console.error('[Save Episode] Error:', err);
+    if (saveStatus) {
+      saveStatus.textContent = '✗ ' + (err.message || 'Save failed');
+      saveStatus.style.color = '#ef4444';
+    }
+  } finally {
+    saveEpisodeBtn.disabled = false;
+    saveEpisodeBtn.textContent = 'Save episode';
   }
 }
 
