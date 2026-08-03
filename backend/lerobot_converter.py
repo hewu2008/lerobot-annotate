@@ -5,6 +5,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.common.datasets.utils import DEFAULT_FEATURES, serialize_dict
@@ -126,9 +127,16 @@ def process_dataset_with_annotations(
     kept_episodes = 0
     total_frames = 0
 
-    for ep_idx in range(original_episodes):
+    ep_pbar = tqdm(
+        range(original_episodes),
+        total=original_episodes,
+        desc="Processing episodes",
+        unit="ep",
+        dynamic_ncols=True,
+    )
+    for ep_idx in ep_pbar:
         if ep_idx in deleted_episodes:
-            print(f"[Process] Deleting episode {ep_idx}")
+            ep_pbar.write(f"[Process] Skipping deleted episode {ep_idx}")
             continue
 
         ann = annotations.get(int(ep_idx))
@@ -149,9 +157,18 @@ def process_dataset_with_annotations(
 
         ep_from = int(src.episode_data_index["from"][ep_idx])
         ep_to = int(src.episode_data_index["to"][ep_idx])
+        ep_len = ep_to - ep_from
 
         added = 0
-        for abs_idx in range(ep_from, ep_to):
+        frame_pbar = tqdm(
+            range(ep_from, ep_to),
+            total=ep_len,
+            desc=f"  Ep {ep_idx} frames",
+            unit="frm",
+            leave=False,
+            dynamic_ncols=True,
+        )
+        for abs_idx in frame_pbar:
             frame = src[abs_idx]
             ts = float(frame["timestamp"].item())
 
@@ -168,27 +185,34 @@ def process_dataset_with_annotations(
                     frame_dict[key] = frame[key]
             dst.add_frame(frame_dict)
             added += 1
+        frame_pbar.close()
 
         if added == 0:
-            print(f"[Process] Warning: Episode {ep_idx} empty after trimming, skipping")
+            ep_pbar.write(f"[Process] Warning: Episode {ep_idx} empty after trimming, skipping")
             continue
 
         final_task = episode_task or "default"
-        dst.save_episode(task=final_task, encode_videos=True)
+        with tqdm.external_write_mode(ep_pbar):
+            dst.save_episode(task=final_task, encode_videos=True)
         tasks_set.add(final_task)
         kept_episodes += 1
         total_frames += added
-        print(
-            f"[Process] Episode {ep_idx} -> new ep {kept_episodes - 1} "
-            f"({added} frames, task='{final_task}')"
+        ep_pbar.set_postfix(
+            kept=kept_episodes, frames=total_frames, refresh=False
         )
+        ep_pbar.write(
+            f"[Process] Episode {ep_idx} -> new ep {kept_episodes - 1} "
+            f"({added}/{ep_len} frames kept, task='{final_task}')"
+        )
+    ep_pbar.close()
 
     if kept_episodes == 0:
         raise RuntimeError("All episodes were deleted or resulted in empty data after trimming")
 
     # Consolidate: encode any remaining videos, compute stats, write stats.json.
-    print("[Process] Consolidating dataset (computing statistics)...")
+    print("[Process] Consolidating dataset (encoding videos + computing statistics)...")
     dst.consolidate(run_compute_stats=True, keep_image_files=False)
+    print("[Process] Consolidation complete")
 
     task_names_sorted = sorted(tasks_set)
     summary = {
