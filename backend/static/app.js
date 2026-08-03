@@ -392,6 +392,7 @@ function renderEpisodes() {
     const li = document.createElement('li');
     li.textContent = `Episode ${ep.episode_index}`;
     const span = document.createElement('span');
+    span.className = 'duration';
     span.textContent = formatDuration(ep.duration);
     li.appendChild(span);
     if (state.currentEpisode === ep.episode_index) {
@@ -903,14 +904,8 @@ async function saveEpisode() {
   };
 
   const btnEl = document.getElementById('saveEpisode');
-  const saveStatus = document.getElementById('saveStatus');
-
   btnEl.disabled = true;
   btnEl.textContent = 'Saving...';
-  if (saveStatus) {
-    saveStatus.textContent = 'Saving...';
-    saveStatus.style.color = '#f97316';
-  }
 
   try {
     const res = await fetch(`/api/episodes/${state.currentEpisode}/annotations`, {
@@ -928,19 +923,13 @@ async function saveEpisode() {
       throw new Error(errorMsg);
     }
 
-    if (saveStatus) {
-      saveStatus.textContent = '✓ Episode saved';
-      saveStatus.style.color = '#22c55e';
-    }
+    showToast('Episode saved successfully', 'success');
     renderEpisodes();
     renderLabelChips();
     return true;
   } catch (err) {
     console.error('[Save Episode] Error:', err);
-    if (saveStatus) {
-      saveStatus.textContent = '✗ ' + (err.message || 'Save failed');
-      saveStatus.style.color = '#ef4444';
-    }
+    showToast(err.message || 'Save failed', 'error');
     return false;
   } finally {
     btnEl.disabled = false;
