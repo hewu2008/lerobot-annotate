@@ -213,6 +213,8 @@ let trajectoryData = null;
 let trajectoryType = 'action';
 let trajHiddenDims = new Set();
 let trajHoverX = null;
+let trajDragging = false;
+let trajWasDragging = false;
 
 // Reload video when video key changes
 videoKeySelect.addEventListener('change', () => {
@@ -743,6 +745,7 @@ async function renderMultiCameraGrid(epIdx) {
     if (dur > 0) {
       primaryVideo.currentTime = (Number(multiSeek.value) / 1000) * dur;
     }
+    if (trajectoryData) drawTrajectory();
   };
 
   // Primary video events -> update control bar + sync secondaries
@@ -755,6 +758,7 @@ async function renderMultiCameraGrid(epIdx) {
   primaryVideo.addEventListener('timeupdate', () => {
     updateTimeDisplay();
     updateSeekBar();
+    if (trajectoryData) drawTrajectory();
   });
   primaryVideo.addEventListener('play', () => {
     setPlayPauseIcon();
@@ -1051,17 +1055,37 @@ function drawTrajectory() {
     ctx.fillText(key.length > 13 ? key.slice(0, 13) : key, lx + 10, ly + 8);
   });
 
+  const video = getPrimaryVideoElement();
+  const videoTime = video ? video.currentTime : 0;
+  const videoFrameIdx = Math.round(videoTime * fps);
+  const videoPx = frameToPx(Math.min(videoFrameIdx, nFrames - 1));
+
+  ctx.strokeStyle = '#f97316';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(videoPx, padT);
+  ctx.lineTo(videoPx, padT + plotH);
+  ctx.stroke();
+
+  ctx.fillStyle = '#f97316';
+  ctx.beginPath();
+  ctx.arc(videoPx, padT, 4, 0, Math.PI * 2);
+  ctx.fill();
+
   if (trajHoverX !== null && trajHoverX >= padL && trajHoverX <= w - padR) {
     const time = pxToTime(trajHoverX);
     const frameIdx = pxToFrame(trajHoverX);
-    ctx.strokeStyle = '#f97316';
-    ctx.lineWidth = 1.2;
-    ctx.setLineDash([4, 3]);
-    ctx.beginPath();
-    ctx.moveTo(trajHoverX, padT);
-    ctx.lineTo(trajHoverX, padT + plotH);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    if (!trajDragging) {
+      ctx.strokeStyle = 'rgba(249, 115, 22, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(trajHoverX, padT);
+      ctx.lineTo(trajHoverX, padT + plotH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
 
     const timeLabel = formatTimeWithMs(time);
     ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, sans-serif';
@@ -1086,79 +1110,45 @@ function drawTrajectory() {
     ctx.fillStyle = '#0b0e14';
     ctx.fillText(timeLabel, bx + 4, by + 11);
 
-    ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
-    let tooltipParts = [];
-    keys.forEach((key) => {
-      const origIdx = allKeys.indexOf(key);
-      const color = colors[origIdx % colors.length];
-      const v = data[key][frameIdx];
-      if (v !== null && v !== undefined && !isNaN(v)) {
-        tooltipParts.push({ label: key, value: v, color });
-      }
-    });
-    if (tooltipParts.length > 0 && tooltipParts.length <= 12) {
-      const tx = trajHoverX + 10;
-      let ty = padT + 4;
-      const boxW = 140;
-      const boxH = tooltipParts.length * 13 + 6;
-      let fx = tx;
-      if (fx + boxW > w - padR) fx = trajHoverX - boxW - 10;
-      ctx.fillStyle = 'rgba(15, 20, 30, 0.92)';
-      ctx.strokeStyle = '#334155';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.roundRect(fx, ty, boxW, boxH, 4);
-      ctx.fill();
-      ctx.stroke();
-      tooltipParts.forEach((p, i) => {
-        const ry = ty + 15 + i * 13;
-        ctx.fillStyle = p.color;
-        ctx.fillRect(fx + 6, ry - 7, 7, 7);
-        ctx.fillStyle = '#cbd5e1';
-        const label = p.label.length > 10 ? p.label.slice(0, 10) : p.label;
-        ctx.fillText(label, fx + 18, ry);
-        ctx.fillStyle = '#f1f5f9';
-        ctx.textAlign = 'right';
-        ctx.fillText(p.value.toFixed(3), fx + boxW - 6, ry);
-        ctx.textAlign = 'left';
+    if (!trajDragging) {
+      ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+      let tooltipParts = [];
+      keys.forEach((key) => {
+        const origIdx = allKeys.indexOf(key);
+        const color = colors[origIdx % colors.length];
+        const v = data[key][frameIdx];
+        if (v !== null && v !== undefined && !isNaN(v)) {
+          tooltipParts.push({ label: key, value: v, color });
+        }
       });
+      if (tooltipParts.length > 0 && tooltipParts.length <= 12) {
+        const tx = trajHoverX + 10;
+        let ty = padT + 4;
+        const boxW = 140;
+        const boxH = tooltipParts.length * 13 + 6;
+        let fx = tx;
+        if (fx + boxW > w - padR) fx = trajHoverX - boxW - 10;
+        ctx.fillStyle = 'rgba(15, 20, 30, 0.92)';
+        ctx.strokeStyle = '#334155';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(fx, ty, boxW, boxH, 4);
+        ctx.fill();
+        ctx.stroke();
+        tooltipParts.forEach((p, i) => {
+          const ry = ty + 15 + i * 13;
+          ctx.fillStyle = p.color;
+          ctx.fillRect(fx + 6, ry - 7, 7, 7);
+          ctx.fillStyle = '#cbd5e1';
+          const label = p.label.length > 10 ? p.label.slice(0, 10) : p.label;
+          ctx.fillText(label, fx + 18, ry);
+          ctx.fillStyle = '#f1f5f9';
+          ctx.textAlign = 'right';
+          ctx.fillText(p.value.toFixed(3), fx + boxW - 6, ry);
+          ctx.textAlign = 'left';
+        });
+      }
     }
-  } else {
-    const video = getPrimaryVideoElement();
-    const time = video ? video.currentTime : 0;
-    const frameIdx = Math.round(time * fps);
-    const px = frameToPx(Math.min(frameIdx, nFrames - 1));
-    ctx.strokeStyle = '#f97316';
-    ctx.lineWidth = 1.2;
-    ctx.setLineDash([4, 3]);
-    ctx.beginPath();
-    ctx.moveTo(px, padT);
-    ctx.lineTo(px, padT + plotH);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    const timeLabel = formatTimeWithMs(time);
-    ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, sans-serif';
-    const tw = ctx.measureText(timeLabel).width + 8;
-    let bx = px + 6;
-    if (bx + tw > w - padR) bx = px - tw - 6;
-    ctx.fillStyle = '#f97316';
-    ctx.beginPath();
-    const br = 4;
-    const by = padT - 16;
-    ctx.moveTo(bx + br, by);
-    ctx.lineTo(bx + tw - br, by);
-    ctx.quadraticCurveTo(bx + tw, by, bx + tw, by + br);
-    ctx.lineTo(bx + tw, by + 14 - br);
-    ctx.quadraticCurveTo(bx + tw, by + 14, bx + tw - br, by + 14);
-    ctx.lineTo(bx + br, by + 14);
-    ctx.quadraticCurveTo(bx, by + 14, bx, by + 14 - br);
-    ctx.lineTo(bx, by + br);
-    ctx.quadraticCurveTo(bx, by, bx + br, by);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = '#0b0e14';
-    ctx.fillText(timeLabel, bx + 4, by + 11);
   }
 }
 
@@ -1441,19 +1431,80 @@ window.addEventListener('resize', () => {
   if (trajectoryData) drawTrajectory();
 });
 
+trajectoryCanvas.addEventListener('mousedown', (e) => {
+  if (!trajectoryData) return;
+  const rect = trajectoryCanvas.getBoundingClientRect();
+  const downX = e.clientX - rect.left;
+  const downY = e.clientY - rect.top;
+  const padL = 55, padR = 15, padT = 38;
+
+  if (downY >= padT && downX >= padL && downX <= rect.width - padR) {
+    trajDragging = true;
+    trajectoryCanvas.style.cursor = 'grabbing';
+    const duration = trajectoryData.duration;
+    const plotW = rect.width - padL - padR;
+    const time = ((downX - padL) / plotW) * duration;
+    const video = getPrimaryVideoElement();
+    if (video) {
+      video.currentTime = Math.max(0, Math.min(duration, time));
+    }
+    trajHoverX = downX;
+    drawTrajectory();
+    e.preventDefault();
+  }
+});
+
 trajectoryCanvas.addEventListener('mousemove', (e) => {
   if (!trajectoryData) return;
   const rect = trajectoryCanvas.getBoundingClientRect();
-  trajHoverX = e.clientX - rect.left;
-  drawTrajectory();
+  const moveX = e.clientX - rect.left;
+  const moveY = e.clientY - rect.top;
+  const padL = 55, padR = 15, padT = 38;
+
+  if (trajDragging) {
+    if (moveX >= padL && moveX <= rect.width - padR) {
+      const duration = trajectoryData.duration;
+      const plotW = rect.width - padL - padR;
+      const time = ((moveX - padL) / plotW) * duration;
+      const video = getPrimaryVideoElement();
+      if (video) {
+        video.currentTime = Math.max(0, Math.min(duration, time));
+      }
+      trajHoverX = moveX;
+      drawTrajectory();
+    }
+  } else {
+    if (moveY >= padT && moveX >= padL && moveX <= rect.width - padR) {
+      trajectoryCanvas.style.cursor = 'grab';
+    } else {
+      trajectoryCanvas.style.cursor = 'crosshair';
+    }
+    trajHoverX = moveX;
+    drawTrajectory();
+  }
+});
+
+document.addEventListener('mouseup', () => {
+  if (trajDragging) {
+    trajDragging = false;
+    trajWasDragging = true;
+    trajectoryCanvas.style.cursor = 'crosshair';
+  }
 });
 
 trajectoryCanvas.addEventListener('mouseleave', () => {
-  trajHoverX = null;
-  drawTrajectory();
+  if (!trajDragging) {
+    trajHoverX = null;
+    drawTrajectory();
+  }
 });
 
 trajectoryCanvas.addEventListener('click', (e) => {
+  if (trajWasDragging) {
+    trajWasDragging = false;
+    e.preventDefault();
+    return;
+  }
   if (!trajectoryData) return;
   const rect = trajectoryCanvas.getBoundingClientRect();
   const clickX = e.clientX - rect.left;
@@ -1480,18 +1531,6 @@ trajectoryCanvas.addEventListener('click', (e) => {
       drawTrajectory();
       return;
     }
-  }
-
-  if (clickX >= padL && clickX <= rect.width - padR) {
-    const plotW = rect.width - padL - padR;
-    const duration = trajectoryData.duration;
-    const time = ((clickX - padL) / plotW) * duration;
-    const video = getPrimaryVideoElement();
-    if (video) {
-      video.currentTime = Math.max(0, Math.min(duration, time));
-    }
-    trajHoverX = clickX;
-    drawTrajectory();
   }
 });
 
