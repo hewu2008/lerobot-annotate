@@ -756,3 +756,67 @@ button:disabled {
   color: var(--accent-2);
   background: rgba(6, 182, 212, 0.1);
 }
+
+.trajectory-section {
+  margin: 12px 0;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.trajectory-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.trajectory-header h3 {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+.trajectory-controls {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.trajectory-controls label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.trajectory-controls input[type="radio"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.trajectory-canvas-wrap {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+}
+
+#trajectoryCanvas {
+  width: 100%;
+  height: 200px;
+  border-radius: 6px;
+  display: block;
+}
+
+.trajectory-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--muted);
+  font-size: 0.82rem;
+}

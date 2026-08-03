@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 from fastapi import FastAPI, HTTPException, Request
@@ -1013,6 +1014,80 @@ def get_episode_video_timing(episode_index: int, video_key: str | None = None) -
         "video_start_time": video_info["video_start_time"],
         "video_end_time": video_info["video_end_time"],
         "has_video": video_key is not None,
+    })
+
+
+@app.get("/api/episodes/{episode_index}/trajectory")
+def get_episode_trajectory(episode_index: int) -> JSONResponse:
+    """Get action/state trajectory data for an episode from its parquet file."""
+    if manager.dataset_root is None or manager.info is None:
+        raise HTTPException(status_code=400, detail="Dataset not loaded")
+
+    parquet_path = manager._get_episode_parquet_path(episode_index)
+    if not parquet_path.exists():
+        raise HTTPException(status_code=404, detail=f"Parquet file not found for episode {episode_index}")
+
+    df = pd.read_parquet(parquet_path)
+    if "frame_index" in df.columns:
+        df = df.sort_values("frame_index")
+
+    fps = float(manager.info.get("fps", 30))
+    duration = len(df) / fps if fps else 0.0
+
+    feature_cols = manager.info.get("features", {}) if manager.info else {}
+    action_dims = manager.info.get("action_dimensions", {}) if manager.info else {}
+    state_dims = manager.info.get("state_dimensions", {}) if manager.info else {}
+
+    action_data = {}
+    state_data = {}
+
+    action_col = "action"
+    state_col = "state"
+
+    if action_col in df.columns:
+        raw_actions = df[action_col].tolist()
+        if raw_actions and isinstance(raw_actions[0], (list, tuple, np.ndarray)):
+            n_dims = len(raw_actions[0])
+            dim_names = []
+            if action_dims:
+                dim_names = list(action_dims.keys())
+            elif feature_cols and action_col in feature_cols:
+                dim_names = feature_cols[action_col].get("names", [])
+
+            for i in range(n_dims):
+                name = dim_names[i] if i < len(dim_names) else f"dim_{i}"
+                action_data[name] = [float(a[i]) if a is not None and i < len(a) else None for a in raw_actions]
+        else:
+            action_data["action"] = [float(a) if a is not None else None for a in raw_actions]
+
+    if state_col in df.columns:
+        raw_states = df[state_col].tolist()
+        if raw_states and isinstance(raw_states[0], (list, tuple, np.ndarray)):
+            n_dims = len(raw_states[0])
+            dim_names = []
+            if state_dims:
+                dim_names = list(state_dims.keys())
+            elif feature_cols and state_col in feature_cols:
+                dim_names = feature_cols[state_col].get("names", [])
+
+            for i in range(n_dims):
+                name = dim_names[i] if i < len(dim_names) else f"dim_{i}"
+                state_data[name] = [float(s[i]) if s is not None and i < len(s) else None for s in raw_states]
+        else:
+            state_data["state"] = [float(s) if s is not None else None for s in raw_states]
+
+    columns = [c for c in df.columns if c not in ("frame_index",)]
+
+    return JSONResponse({
+        "episode_index": episode_index,
+        "fps": fps,
+        "num_frames": len(df),
+        "duration": duration,
+        "action": action_data,
+        "state": state_data,
+        "has_action": bool(action_data),
+        "has_state": bool(state_data),
+        "columns": columns,
     })
 
 

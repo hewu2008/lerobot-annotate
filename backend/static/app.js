@@ -205,6 +205,13 @@ const exportBtn = document.getElementById('exportBtn');
 const outputDir = document.getElementById('outputDir');
 const copyVideos = document.getElementById('copyVideos');
 
+const trajectorySection = document.getElementById('trajectorySection');
+const trajectoryCanvas = document.getElementById('trajectoryCanvas');
+const trajectoryEmpty = document.getElementById('trajectoryEmpty');
+
+let trajectoryData = null;
+let trajectoryType = 'action';
+
 // Reload video when video key changes
 videoKeySelect.addEventListener('change', () => {
   if (state.dataset) {
@@ -891,6 +898,152 @@ async function selectEpisode(epIdx) {
   renderSubtasks();
   renderHighLevels();
   renderLabelChips();
+  loadTrajectory(epIdx);
+}
+
+async function loadTrajectory(epIdx) {
+  try {
+    const res = await fetch(`/api/episodes/${epIdx}/trajectory`);
+    if (!res.ok) throw new Error('Failed to load trajectory');
+    trajectoryData = await res.json();
+    trajectorySection.style.display = '';
+    drawTrajectory();
+  } catch (err) {
+    console.warn('[Trajectory] No data:', err);
+    trajectoryData = null;
+    trajectorySection.style.display = 'none';
+  }
+}
+
+function drawTrajectory() {
+  const canvas = trajectoryCanvas;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = 200 * dpr;
+  canvas.style.height = '200px';
+  ctx.scale(dpr, dpr);
+
+  const w = rect.width;
+  const h = 200;
+  ctx.clearRect(0, 0, w, h);
+
+  if (!trajectoryData) return;
+
+  const data = trajectoryType === 'action' ? trajectoryData.action : trajectoryData.state;
+  if (!data || Object.keys(data).length === 0) {
+    trajectoryEmpty.style.display = '';
+    return;
+  }
+  trajectoryEmpty.style.display = 'none';
+
+  const keys = Object.keys(data);
+  const nFrames = trajectoryData.num_frames;
+  const duration = trajectoryData.duration;
+  const fps = trajectoryData.fps || 30;
+
+  const padL = 55, padR = 15, padT = 10, padB = 22;
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+
+  let globalMin = Infinity, globalMax = -Infinity;
+  keys.forEach(k => {
+    const vals = data[k].filter(v => v !== null && v !== undefined && !isNaN(v));
+    if (vals.length) {
+      const mn = Math.min(...vals);
+      const mx = Math.max(...vals);
+      if (mn < globalMin) globalMin = mn;
+      if (mx > globalMax) globalMax = mx;
+    }
+  });
+  if (!isFinite(globalMin)) { globalMin = -1; globalMax = 1; }
+  if (globalMax - globalMin < 1e-6) { globalMin -= 1; globalMax += 1; }
+
+  const yToPx = v => padT + plotH - ((v - globalMin) / (globalMax - globalMin)) * plotH;
+  const frameToPx = i => padL + (i / Math.max(1, nFrames - 1)) * plotW;
+
+  ctx.fillStyle = '#0b0e14';
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.strokeStyle = '#1e293b';
+  ctx.lineWidth = 1;
+  ctx.font = '10px sans-serif';
+  ctx.fillStyle = '#64748b';
+
+  for (let i = 0; i <= 4; i++) {
+    const y = padT + (plotH * i / 4);
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(w - padR, y);
+    ctx.stroke();
+    const val = globalMax - ((globalMax - globalMin) * i / 4);
+    ctx.fillText(val.toFixed(3), 2, y + 3);
+  }
+
+  for (let i = 0; i <= 5; i++) {
+    const x = padL + (plotW * i / 5);
+    const t = (duration * i / 5);
+    ctx.beginPath();
+    ctx.moveTo(x, padT);
+    ctx.lineTo(x, padT + plotH);
+    ctx.strokeStyle = '#1a1f2e';
+    ctx.stroke();
+    ctx.fillStyle = '#64748b';
+    const label = t >= 60 ? `${Math.floor(t / 60)}m${Math.floor(t % 60)}s` : `${t.toFixed(1)}s`;
+    ctx.fillText(label, x - 15, h - 5);
+  }
+
+  const colors = [
+    '#f97316', '#22c55e', '#3b82f6', '#ec4899', '#a855f7',
+    '#14b8a6', '#eab308', '#ef4444', '#06b6d4', '#8b5cf6',
+  ];
+
+  const legendX = padL + 5;
+  const legendY = padT + 2;
+  ctx.font = '10px sans-serif';
+  keys.forEach((key, idx) => {
+    const color = colors[idx % colors.length];
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    const vals = data[key];
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < vals.length; i++) {
+      const v = vals[i];
+      if (v === null || v === undefined || isNaN(v)) { started = false; continue; }
+      const x = frameToPx(i);
+      const y = yToPx(v);
+      if (!started) { ctx.moveTo(x, y); started = true; }
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    const col = Math.floor(idx / 5);
+    const row = idx % 5;
+    const lx = legendX + col * 110;
+    const ly = legendY + row * 12;
+    ctx.fillStyle = color;
+    ctx.fillRect(lx, ly, 8, 8);
+    ctx.fillStyle = '#cbd5e1';
+    ctx.fillText(key.length > 14 ? key.slice(0, 14) : key, lx + 12, ly + 8);
+  });
+
+  if (trajectoryData.duration > 0) {
+    const video = getPrimaryVideoElement();
+    const time = video ? video.currentTime : 0;
+    const frameIdx = Math.round(time * fps);
+    const px = frameToPx(Math.min(frameIdx, nFrames - 1));
+    ctx.strokeStyle = '#f97316';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(px, padT);
+    ctx.lineTo(px, padT + plotH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
 }
 
 async function saveEpisode() {
@@ -1148,7 +1301,21 @@ episodeVideo.addEventListener('loadedmetadata', () => {
 });
 
 // Update time display continuously during video playback
-episodeVideo.addEventListener('timeupdate', updateTimeDisplay);
+episodeVideo.addEventListener('timeupdate', () => {
+  updateTimeDisplay();
+  if (trajectoryData) drawTrajectory();
+});
+
+document.querySelectorAll('input[name="trajType"]').forEach(radio => {
+  radio.addEventListener('change', (e) => {
+    trajectoryType = e.target.value;
+    drawTrajectory();
+  });
+});
+
+window.addEventListener('resize', () => {
+  if (trajectoryData) drawTrajectory();
+});
 
 tabs.forEach(tab => {
   tab.addEventListener('click', () => {
