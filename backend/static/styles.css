@@ -807,9 +807,10 @@ button:disabled {
 
 #trajectoryCanvas {
   width: 100%;
-  height: 200px;
+  height: 220px;
   border-radius: 6px;
   display: block;
+  cursor: crosshair;
 }
 
 .trajectory-empty {
