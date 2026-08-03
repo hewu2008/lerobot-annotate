@@ -900,14 +900,19 @@ def export_dataset(payload: dict[str, Any]) -> JSONResponse:
 
 
 @app.post("/api/convert_to_lerobot")
-def convert_to_lerobot(payload: dict[str, Any]) -> JSONResponse:
+def convert_to_lerobot(payload: dict[str, Any]):
     """Convert annotations to LeRobot standard format with episode deletion/trimming.
 
-    Uses lerobot's APIs to:
-    1. Load the original dataset
-    2. Delete episodes marked for deletion
-    3. Trim remaining episodes to annotated task time ranges
-    4. Save as a new LeRobot-compatible dataset
+    Streams progress events to the client as Server-Sent Events so the page
+    can render a live progress bar. Each event is a JSON object on a line
+    prefixed with `data: `.
+
+    Event types:
+      - {"type":"phase","phase":"loading|processing|consolidating"[,"total_episodes":N]}
+      - {"type":"episode_skip","ep":i,"reason":"deleted|empty","total_kept":K,"total_frames":F}
+      - {"type":"episode_done","ep":i,"new_ep":k,"kept":a,"ep_len":L,"task":t,"total_kept":K,"total_frames":F}
+      - {"type":"done","summary":{...}}
+      - {"type":"error","detail":"..."}
     """
     if manager.dataset_root is None or manager.info is None:
         raise HTTPException(status_code=400, detail="Dataset not loaded")
@@ -920,35 +925,50 @@ def convert_to_lerobot(payload: dict[str, Any]) -> JSONResponse:
         name = (manager.repo_id or "local_dataset").replace("/", "__")
         out_root = EXPORT_ROOT / f"{name}_processed"
 
-    # Use the new processing function that loads, deletes/trims, and saves
-    try:
-        summary = process_dataset_with_annotations(
-            dataset_root=manager.dataset_root,
-            annotations=manager.annotations,
-            deleted_episodes=manager.deleted_episodes,
-            output_dir=out_root,
-            info=manager.info,
-        )
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Processing failed: {e}")
+    import queue
+    import threading
 
-    return JSONResponse({
-        "ok": True,
-        "output_dir": summary["output_dir"],
-        "total_episodes": summary["total_episodes"],
-        "total_frames": summary["total_frames"],
-        "total_tasks": summary["total_tasks"],
-        "tasks": summary["tasks"],
-        "original_episodes": summary["original_episodes"],
-        "deleted_episodes": summary["deleted_episodes"],
-        "message": "Dataset processed successfully: episodes deleted/trimmed and saved in LeRobot format",
-    })
+    ev_queue: "queue.Queue[dict[str, Any]]" = queue.Queue()
+
+    def progress_cb(ev: dict[str, Any]) -> None:
+        ev_queue.put(ev)
+
+    def run_worker() -> None:
+        try:
+            summary = process_dataset_with_annotations(
+                dataset_root=manager.dataset_root,
+                annotations=manager.annotations,
+                deleted_episodes=manager.deleted_episodes,
+                output_dir=out_root,
+                info=manager.info,
+                progress_callback=progress_cb,
+            )
+        except FileNotFoundError as e:
+            ev_queue.put({"type": "error", "detail": str(e)})
+            return
+        except RuntimeError as e:
+            ev_queue.put({"type": "error", "detail": str(e)})
+            return
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            ev_queue.put({"type": "error", "detail": f"Processing failed: {e}"})
+            return
+        ev_queue.put({"type": "done", "summary": summary})
+
+    def event_stream():
+        worker = threading.Thread(target=run_worker, daemon=True)
+        worker.start()
+        try:
+            while True:
+                ev = ev_queue.get()
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                if ev.get("type") in ("done", "error"):
+                    break
+        finally:
+            worker.join(timeout=1.0)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 class PushToHubRequest(BaseModel):

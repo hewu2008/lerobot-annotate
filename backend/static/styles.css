@@ -533,6 +533,32 @@ video {
   margin-top: 8px;
 }
 
+.convert-progress {
+  margin-top: 10px;
+}
+
+.convert-progress-bar {
+  height: 6px;
+  width: 100%;
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.convert-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent-2);
+  border-radius: 3px;
+  transition: width 0.25s ease;
+}
+
+.convert-progress-text {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
 .checkbox {
   flex-direction: row;
   align-items: center;

@@ -1597,34 +1597,99 @@ tabs.forEach(tab => {
 const convertBtn = document.getElementById('convertBtn');
 const convertOutputDir = document.getElementById('convertOutputDir');
 const convertStatus = document.getElementById('convertStatus');
+const convertProgress = document.getElementById('convertProgress');
+const convertProgressFill = document.getElementById('convertProgressFill');
+const convertProgressText = document.getElementById('convertProgressText');
 
 convertBtn.addEventListener('click', async () => {
-  convertStatus.textContent = 'Converting to LeRobot standard format...';
-  const payload = {
-    output_dir: convertOutputDir.value.trim() || null,
-  };
+  convertBtn.disabled = true;
+  convertStatus.textContent = '';
+  convertProgress.hidden = false;
+  convertProgressFill.style.width = '0%';
+  convertProgressText.textContent = 'Starting...';
+  const payload = { output_dir: convertOutputDir.value.trim() || null };
+
+  let totalEpisodes = 0;
   try {
     const res = await fetch('/api/convert_to_lerobot', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    const data = await res.json();
-    if (res.ok) {
-      const taskList = data.tasks && data.tasks.length > 0 
-        ? `<br><span class="muted">Tasks: ${data.tasks.join(', ')}</span>` 
-        : '';
-      const stats = `<br><span class="muted">${data.total_episodes} episodes, ${data.total_frames} frames (from ${data.original_episodes} original)</span>`;
-      const outDir = data.output_dir ? `<br><span class="muted">Output: ${data.output_dir}</span>` : '';
-      convertStatus.innerHTML = `✓ Converted successfully${outDir}${stats}${taskList}`;
-      showToast('Converted to LeRobot standard format', 'success');
-    } else {
-      convertStatus.textContent = data.detail || 'Conversion failed';
-      showToast(data.detail || 'Conversion failed', 'error');
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try { detail = (await res.json()).detail || detail; } catch (_) {}
+      throw new Error(detail);
     }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let summary = null;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n');
+      buffer = parts.pop();
+      for (const line of parts) {
+        if (!line.startsWith('data: ')) continue;
+        let ev;
+        try { ev = JSON.parse(line.slice(6)); } catch (_) { continue; }
+        switch (ev.type) {
+          case 'phase':
+            if (ev.phase === 'loading') {
+              convertProgressText.textContent = 'Loading source dataset...';
+              convertProgressFill.style.width = '2%';
+            } else if (ev.phase === 'processing') {
+              totalEpisodes = ev.total_episodes || 0;
+              convertProgressText.textContent = `Processing 0/${totalEpisodes} episodes...`;
+              convertProgressFill.style.width = '5%';
+            } else if (ev.phase === 'consolidating') {
+              convertProgressText.textContent = 'Encoding videos & computing statistics...';
+              convertProgressFill.style.width = '92%';
+            }
+            break;
+          case 'episode_skip':
+            if (totalEpisodes > 0) {
+              const pct = Math.round((ev.ep + 1) / totalEpisodes * 88) + 5;
+              convertProgressFill.style.width = pct + '%';
+              convertProgressText.textContent = `Episode ${ev.ep + 1}/${totalEpisodes} skipped (${ev.reason}) — kept ${ev.total_kept} eps, ${ev.total_frames} frames`;
+            }
+            break;
+          case 'episode_done':
+            if (totalEpisodes > 0) {
+              const pct = Math.round((ev.ep + 1) / totalEpisodes * 88) + 5;
+              convertProgressFill.style.width = pct + '%';
+              convertProgressText.textContent = `Episode ${ev.ep + 1}/${totalEpisodes} done — kept ${ev.kept}/${ev.ep_len} frames (task: ${ev.task})`;
+            }
+            break;
+          case 'done':
+            summary = ev.summary;
+            break;
+          case 'error':
+            throw new Error(ev.detail || 'Conversion failed');
+        }
+      }
+    }
+
+    if (!summary) throw new Error('No summary received from server');
+    convertProgressFill.style.width = '100%';
+    convertProgressText.textContent = 'Done';
+    const s = summary;
+    const taskList = s.tasks && s.tasks.length > 0
+      ? `<br><span class="muted">Tasks: ${s.tasks.join(', ')}</span>`
+      : '';
+    const stats = `<br><span class="muted">${s.total_episodes} episodes, ${s.total_frames} frames (from ${s.original_episodes} original)</span>`;
+    const outDir = s.output_dir ? `<br><span class="muted">Output: ${s.output_dir}</span>` : '';
+    convertStatus.innerHTML = `✓ Converted successfully${outDir}${stats}${taskList}`;
+    showToast('Converted to LeRobot standard format', 'success');
   } catch (err) {
     convertStatus.textContent = err.message || 'Conversion failed';
     showToast(err.message || 'Conversion failed', 'error');
+  } finally {
+    convertBtn.disabled = false;
+    setTimeout(() => { convertProgress.hidden = true; }, 4000);
   }
 });
 

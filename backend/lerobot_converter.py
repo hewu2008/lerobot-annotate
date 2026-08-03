@@ -1,7 +1,7 @@
 import json
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
@@ -62,6 +62,7 @@ def process_dataset_with_annotations(
     deleted_episodes: set[int],
     output_dir: Path,
     info: dict[str, Any],
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Process a LeRobot dataset using the LeRobotDataset API.
 
@@ -87,9 +88,17 @@ def process_dataset_with_annotations(
     dataset_root = Path(dataset_root)
     output_dir = Path(output_dir)
 
+    def _emit(ev: dict[str, Any]) -> None:
+        if progress_callback is not None:
+            try:
+                progress_callback(ev)
+            except Exception:
+                pass
+
     repo_id = info.get("repo_id") or "local_dataset"
 
     # Load source dataset (v2.0) directly from disk.
+    _emit({"type": "phase", "phase": "loading"})
     print(f"[Process] Loading source LeRobotDataset from {dataset_root}")
     src = LeRobotDataset(
         repo_id=repo_id,
@@ -106,6 +115,8 @@ def process_dataset_with_annotations(
     # Features that must be provided per-frame (everything LeRobot does not
     # manage automatically).
     data_feature_keys = [k for k in features if k not in DEFAULT_FEATURES]
+
+    _emit({"type": "phase", "phase": "processing", "total_episodes": original_episodes})
 
     # Create the destination dataset. LeRobotDataset.create requires a fresh,
     # non-existent root directory.
@@ -137,6 +148,7 @@ def process_dataset_with_annotations(
     for ep_idx in ep_pbar:
         if ep_idx in deleted_episodes:
             ep_pbar.write(f"[Process] Skipping deleted episode {ep_idx}")
+            _emit({"type": "episode_skip", "ep": int(ep_idx), "reason": "deleted", "total_kept": kept_episodes, "total_frames": total_frames})
             continue
 
         ann = annotations.get(int(ep_idx))
@@ -189,6 +201,7 @@ def process_dataset_with_annotations(
 
         if added == 0:
             ep_pbar.write(f"[Process] Warning: Episode {ep_idx} empty after trimming, skipping")
+            _emit({"type": "episode_skip", "ep": int(ep_idx), "reason": "empty", "total_kept": kept_episodes, "total_frames": total_frames})
             continue
 
         final_task = episode_task or "default"
@@ -204,12 +217,23 @@ def process_dataset_with_annotations(
             f"[Process] Episode {ep_idx} -> new ep {kept_episodes - 1} "
             f"({added}/{ep_len} frames kept, task='{final_task}')"
         )
+        _emit({
+            "type": "episode_done",
+            "ep": int(ep_idx),
+            "new_ep": kept_episodes - 1,
+            "kept": int(added),
+            "ep_len": int(ep_len),
+            "task": final_task,
+            "total_kept": kept_episodes,
+            "total_frames": total_frames,
+        })
     ep_pbar.close()
 
     if kept_episodes == 0:
         raise RuntimeError("All episodes were deleted or resulted in empty data after trimming")
 
     # Consolidate: encode any remaining videos, compute stats, write stats.json.
+    _emit({"type": "phase", "phase": "consolidating"})
     print("[Process] Consolidating dataset (encoding videos + computing statistics)...")
     dst.consolidate(run_compute_stats=True, keep_image_files=False)
     print("[Process] Consolidation complete")
