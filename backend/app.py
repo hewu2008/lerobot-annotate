@@ -139,16 +139,24 @@ class SegmentHighLevel(BaseModel):
     response_type: str | None = None
 
 
+class SegmentTask(BaseModel):
+    start: float
+    end: float
+    name: str
+
+
 class EpisodeAnnotationsPayload(BaseModel):
     episode_index: int
     subtasks: list[SegmentSubtask] = []
     high_levels: list[SegmentHighLevel] = []
+    tasks: list[SegmentTask] = []
 
 
 @dataclass
 class EpisodeAnnotations:
     subtasks: list[dict[str, Any]] = field(default_factory=list)
     high_levels: list[dict[str, Any]] = field(default_factory=list)
+    tasks: list[dict[str, Any]] = field(default_factory=list)
 
 
 class DataManager:
@@ -263,6 +271,7 @@ class DataManager:
                 self.annotations[ep_idx] = EpisodeAnnotations(
                     subtasks=payload.get("subtasks", []),
                     high_levels=payload.get("high_levels", []),
+                    tasks=payload.get("tasks", []),
                 )
             return
 
@@ -278,7 +287,7 @@ class DataManager:
                     for s in skills
                     if "start" in s and "end" in s
                 ]
-                self.annotations[ep_idx] = EpisodeAnnotations(subtasks=subtasks, high_levels=[])
+                self.annotations[ep_idx] = EpisodeAnnotations(subtasks=subtasks, high_levels=[], tasks=[])
 
     def _save_annotations(self) -> None:
         if not self.annotations_path:
@@ -289,6 +298,7 @@ class DataManager:
                 str(ep_idx): {
                     "subtasks": ann.subtasks,
                     "high_levels": ann.high_levels,
+                    "tasks": ann.tasks,
                 }
                 for ep_idx, ann in self.annotations.items()
             },
@@ -535,6 +545,7 @@ class DataManager:
         self.annotations[payload.episode_index] = EpisodeAnnotations(
             subtasks=[seg.dict() for seg in payload.subtasks],
             high_levels=[seg.dict() for seg in payload.high_levels],
+            tasks=[seg.dict() for seg in payload.tasks],
         )
         self._save_annotations()
 
@@ -560,11 +571,14 @@ class DataManager:
 
         subtasks_df, subtask_map = build_subtasks_dataframe(self.annotations)
         tasks_df, task_map = build_high_level_dataframe(self.annotations)
+        tasks_basic_df, task_basic_map = build_tasks_dataframe(self.annotations)
 
         if not subtasks_df.empty:
             subtasks_df.to_parquet(dst_meta / "subtasks.parquet", engine="pyarrow", compression="snappy")
         if not tasks_df.empty:
             tasks_df.to_parquet(dst_meta / "tasks_high_level.parquet", engine="pyarrow", compression="snappy")
+        if not tasks_basic_df.empty:
+            tasks_basic_df.to_parquet(dst_meta / "tasks.parquet", engine="pyarrow", compression="snappy")
 
         # Update info.json features
         info_path = dst_meta / "info.json"
@@ -576,6 +590,10 @@ class DataManager:
         )
         info["features"].setdefault(
             "task_index_high_level",
+            {"dtype": "int64", "shape": [1], "names": None},
+        )
+        info["features"].setdefault(
+            "task_index",
             {"dtype": "int64", "shape": [1], "names": None},
         )
         info_path.write_text(json.dumps(info, indent=2))
@@ -594,6 +612,7 @@ class DataManager:
             df = pd.read_parquet(src_path)
             df["subtask_index"] = -1
             df["task_index_high_level"] = -1
+            df["task_index"] = -1
 
             for ep_idx in df["episode_index"].unique():
                 ann = self.annotations.get(int(ep_idx))
@@ -617,6 +636,14 @@ class DataManager:
                         label_key="task_key",
                     )
 
+                if ann.tasks and task_basic_map:
+                    df.loc[ep_mask, "task_index"] = assign_indices_by_segments(
+                        df.loc[ep_mask, "timestamp"],
+                        ann.tasks,
+                        task_basic_map,
+                        label_key="name",
+                    )
+
             df.to_parquet(dst_path, engine="pyarrow", compression="snappy", index=False)
 
         # Copy or link videos
@@ -637,6 +664,7 @@ class DataManager:
             "output_dir": str(out_root),
             "subtasks": len(subtasks_df),
             "tasks_high_level": len(tasks_df),
+            "tasks": len(tasks_basic_df),
         }
 
 
@@ -648,6 +676,16 @@ def build_subtasks_dataframe(annotations: dict[int, EpisodeAnnotations]) -> tupl
         df = df.set_index("subtask")
     subtask_map = {label: idx for idx, label in enumerate(labels)}
     return df, subtask_map
+
+
+def build_tasks_dataframe(annotations: dict[int, EpisodeAnnotations]) -> tuple[pd.DataFrame, dict[str, int]]:
+    names = sorted({seg["name"] for ann in annotations.values() for seg in ann.tasks if seg.get("name")})
+    data = [{"task": name, "task_index": idx} for idx, name in enumerate(names)]
+    df = pd.DataFrame(data)
+    if not df.empty:
+        df = df.set_index("task")
+    task_map = {name: idx for idx, name in enumerate(names)}
+    return df, task_map
 
 
 def build_high_level_dataframe(annotations: dict[int, EpisodeAnnotations]) -> tuple[pd.DataFrame, dict[str, int]]:
@@ -766,6 +804,7 @@ def get_annotations(episode_index: int) -> JSONResponse:
         "episode_index": episode_index,
         "subtasks": ann.subtasks,
         "high_levels": ann.high_levels,
+        "tasks": ann.tasks,
     })
 
 

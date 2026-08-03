@@ -101,7 +101,8 @@
         </div>
 
         <div class="tabs">
-          <button class="tab active" data-tab="subtasks">Subtasks</button>
+          <button class="tab active" data-tab="tasks">Tasks</button>
+          <button class="tab" data-tab="subtasks">Subtasks</button>
           <button class="tab" data-tab="highlevels">High-level prompts</button>
         </div>
 
@@ -171,6 +172,31 @@
             </div>
           </div>
           <div id="highLevelList" class="segment-list"></div>
+        </section>
+
+        <section class="tab-panel" id="tasksPanel">
+          <div class="segment-form">
+            <div class="row">
+              <label>
+                Start (s)
+                <input id="taskStart" type="number" step="0.001" />
+              </label>
+              <label>
+                End (s)
+                <input id="taskEnd" type="number" step="0.001" />
+              </label>
+              <label class="grow">
+                Task name
+                <input id="taskName" type="text" placeholder="pick up block" />
+              </label>
+            </div>
+            <div class="row">
+              <button id="taskSetStart" class="ghost" type="button">Set start from video</button>
+              <button id="taskSetEnd" class="ghost" type="button">Set end from video</button>
+              <button id="addTask" class="primary" type="button">Add task</button>
+            </div>
+          </div>
+          <div id="taskList" class="segment-list"></div>
         </section>
       </main>
     </section>

@@ -172,6 +172,14 @@ const hlSetEnd = document.getElementById('hlSetEnd');
 const addHighLevel = document.getElementById('addHighLevel');
 const highLevelList = document.getElementById('highLevelList');
 
+const taskStart = document.getElementById('taskStart');
+const taskEnd = document.getElementById('taskEnd');
+const taskName = document.getElementById('taskName');
+const taskSetStart = document.getElementById('taskSetStart');
+const taskSetEnd = document.getElementById('taskSetEnd');
+const addTask = document.getElementById('addTask');
+const taskList = document.getElementById('taskList');
+
 const exportBtn = document.getElementById('exportBtn');
 const outputDir = document.getElementById('outputDir');
 const copyVideos = document.getElementById('copyVideos');
@@ -318,11 +326,14 @@ function resetEpisodeForm() {
   hlSkill.value = '';
   hlScenario.value = '';
   hlResponse.value = '';
+  taskStart.value = '';
+  taskEnd.value = '';
+  taskName.value = '';
 }
 
 function getEpisodeAnnotations(epIdx) {
   if (!state.annotations[epIdx]) {
-    state.annotations[epIdx] = { subtasks: [], high_levels: [] };
+    state.annotations[epIdx] = { subtasks: [], high_levels: [], tasks: [] };
   }
   return state.annotations[epIdx];
 }
@@ -544,6 +555,79 @@ function renderHighLevels() {
   });
 }
 
+function renderTasks() {
+  taskList.innerHTML = '';
+  if (state.currentEpisode == null) return;
+  const ann = getEpisodeAnnotations(state.currentEpisode);
+  ann.tasks.sort((a, b) => a.start - b.start);
+
+  // Build task index map based on all annotations (consistent with export)
+  const taskMap = {};
+  const allNames = new Set();
+  for (const epAnn of Object.values(state.annotations)) {
+    for (const seg of epAnn.tasks || []) {
+      if (seg.name) {
+        allNames.add(seg.name);
+      }
+    }
+  }
+  const sortedNames = Array.from(allNames).sort();
+  sortedNames.forEach((name, idx) => {
+    taskMap[name] = idx;
+  });
+
+  ann.tasks.forEach((seg, idx) => {
+    const row = document.createElement('div');
+    row.className = 'segment-item';
+
+    const indexBadge = document.createElement('span');
+    const taskIndex = taskMap[seg.name] ?? '?';
+    indexBadge.textContent = taskIndex;
+    indexBadge.title = `task_index: ${taskIndex}`;
+    indexBadge.style.cssText = 'display: flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; background: var(--accent-2); color: #0b0e14; border-radius: 6px; font-weight: 600; font-size: 12px;';
+
+    const startInput = document.createElement('input');
+    startInput.type = 'number';
+    startInput.step = '0.001';
+    startInput.value = seg.start;
+    startInput.addEventListener('change', () => {
+      seg.start = Number(startInput.value);
+    });
+
+    const endInput = document.createElement('input');
+    endInput.type = 'number';
+    endInput.step = '0.001';
+    endInput.value = seg.end;
+    endInput.addEventListener('change', () => {
+      seg.end = Number(endInput.value);
+    });
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.value = seg.name;
+    nameInput.addEventListener('change', () => {
+      seg.name = nameInput.value;
+      renderTasks();
+    });
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'ghost';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', () => {
+      ann.tasks.splice(idx, 1);
+      renderTasks();
+    });
+
+    row.appendChild(indexBadge);
+    row.appendChild(startInput);
+    row.appendChild(endInput);
+    row.appendChild(nameInput);
+    row.appendChild(deleteBtn);
+
+    taskList.appendChild(row);
+  });
+}
+
 async function renderMultiCameraGrid(epIdx) {
   const videoKeys = state.dataset?.video_keys || [];
   if (!videoKeys.length) return;
@@ -702,6 +786,7 @@ async function selectEpisode(epIdx) {
   state.annotations[epIdx] = {
     subtasks: data.subtasks || [],
     high_levels: data.high_levels || [],
+    tasks: data.tasks || [],
   };
 
   // Load video only if the dataset has video keys
@@ -736,6 +821,7 @@ async function selectEpisode(epIdx) {
   renderEpisodes();
   renderSubtasks();
   renderHighLevels();
+  renderTasks();
 }
 
 async function saveEpisode() {
@@ -745,6 +831,7 @@ async function saveEpisode() {
     episode_index: state.currentEpisode,
     subtasks: ann.subtasks,
     high_levels: ann.high_levels,
+    tasks: ann.tasks,
   };
   const res = await fetch(`/api/episodes/${state.currentEpisode}/annotations`, {
     method: 'POST',
@@ -881,12 +968,35 @@ addHighLevel.addEventListener('click', () => {
   hlRobot.value = '';
 });
 
+taskSetStart.addEventListener('click', () => {
+  taskStart.value = currentTime();
+});
+
+taskSetEnd.addEventListener('click', () => {
+  taskEnd.value = currentTime();
+});
+
+addTask.addEventListener('click', () => {
+  if (state.currentEpisode == null) return;
+  const start = Number(taskStart.value);
+  const end = Number(taskEnd.value);
+  const name = taskName.value.trim();
+  if (!name || Number.isNaN(start) || Number.isNaN(end) || end <= start) {
+    return;
+  }
+  const ann = getEpisodeAnnotations(state.currentEpisode);
+  ann.tasks.push({ start, end, name });
+  renderTasks();
+  taskName.value = '';
+});
+
 saveEpisodeBtn.addEventListener('click', () => saveEpisode());
 resetEpisodeBtn.addEventListener('click', () => {
   if (state.currentEpisode == null) return;
-  state.annotations[state.currentEpisode] = { subtasks: [], high_levels: [] };
+  state.annotations[state.currentEpisode] = { subtasks: [], high_levels: [], tasks: [] };
   renderSubtasks();
   renderHighLevels();
+  renderTasks();
   renderTimeline();
 });
 
@@ -924,7 +1034,7 @@ exportBtn.addEventListener('click', async () => {
   });
   const data = await res.json();
   if (res.ok) {
-    exportStatus.textContent = `Exported to ${data.output_dir} (subtasks: ${data.subtasks}, high-level: ${data.tasks_high_level})`;
+    exportStatus.textContent = `Exported to ${data.output_dir} (subtasks: ${data.subtasks}, high-level: ${data.tasks_high_level}, tasks: ${data.tasks})`;
   } else {
     exportStatus.textContent = data.detail || 'Export failed';
   }
