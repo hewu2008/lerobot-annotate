@@ -1596,22 +1596,62 @@ tabs.forEach(tab => {
   });
 });
 
+const convertBtn = document.getElementById('convertBtn');
+const convertOutputDir = document.getElementById('convertOutputDir');
+const convertStatus = document.getElementById('convertStatus');
+
+convertBtn.addEventListener('click', async () => {
+  convertStatus.textContent = 'Converting to LeRobot standard format...';
+  const payload = {
+    output_dir: convertOutputDir.value.trim() || null,
+  };
+  try {
+    const res = await fetch('/api/convert_to_lerobot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      const taskList = data.tasks && data.tasks.length > 0 
+        ? `<br><span class="muted">Tasks: ${data.tasks.join(', ')}</span>` 
+        : '';
+      convertStatus.innerHTML = `✓ Converted successfully${taskList}`;
+      showToast('Converted to LeRobot standard format', 'success');
+    } else {
+      convertStatus.textContent = data.detail || 'Conversion failed';
+      showToast(data.detail || 'Conversion failed', 'error');
+    }
+  } catch (err) {
+    convertStatus.textContent = err.message || 'Conversion failed';
+    showToast(err.message || 'Conversion failed', 'error');
+  }
+});
+
 exportBtn.addEventListener('click', async () => {
-  exportStatus.textContent = 'Exporting...';
+  exportStatus.textContent = 'Exporting and converting to LeRobot standard format...';
   const payload = {
     output_dir: outputDir.value.trim() || null,
     copy_videos: copyVideos.checked,
   };
-  const res = await fetch('/api/export', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const data = await res.json();
-  if (res.ok) {
-    exportStatus.textContent = `Exported to ${data.output_dir} (subtasks: ${data.subtasks}, high-level: ${data.tasks_high_level}, tasks: ${data.tasks})`;
-  } else {
-    exportStatus.textContent = data.detail || 'Export failed';
+  try {
+    const res = await fetch('/api/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      exportStatus.innerHTML = `✓ Exported to ${data.output_dir}<br>
+        <span class="muted">LeRobot format: ${data.total_tasks} tasks, ${data.subtasks} subtasks, ${data.tasks_high_level} high-level</span>`;
+      showToast('Dataset exported in LeRobot standard format', 'success');
+    } else {
+      exportStatus.textContent = data.detail || 'Export failed';
+      showToast(data.detail || 'Export failed', 'error');
+    }
+  } catch (err) {
+    exportStatus.textContent = err.message || 'Export failed';
+    showToast(err.message || 'Export failed', 'error');
   }
 });
 
