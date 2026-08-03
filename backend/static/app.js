@@ -910,7 +910,6 @@ async function loadTrajectory(epIdx) {
     trajectoryData = await res.json();
     trajectorySection.style.display = '';
     drawTrajectory();
-    requestAnimationFrame(syncEpisodesHeight);
   } catch (err) {
     console.warn('[Trajectory] No data:', err);
     trajectoryData = null;
