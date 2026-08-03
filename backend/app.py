@@ -332,12 +332,14 @@ class DataManager:
             }
             # Pass through any task/task_label/tasks columns from episodes.jsonl
             for col in ("task", "task_label", "tasks", "task_name"):
-                if col in row and pd.notna(row[col]):
-                    val = row[col]
-                    if isinstance(val, (list, dict)):
-                        ep_entry[col] = val
-                    else:
-                        ep_entry[col] = str(val)
+                if col not in row:
+                    continue
+                val = row[col]
+                # pd.notna doesn't work on list/dict values (returns array), so check types first
+                if isinstance(val, (list, dict)):
+                    ep_entry[col] = val
+                elif pd.notna(val):
+                    ep_entry[col] = str(val)
             episodes.append(ep_entry)
         return {
             "source": self.source,

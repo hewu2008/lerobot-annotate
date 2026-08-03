@@ -884,7 +884,15 @@ async function selectEpisode(epIdx) {
     const fullEndFrame = epData.length || (fps > 0 ? Math.round(fullEnd * fps) : 0);
 
     // Pre-fill task label from episodes.jsonl if available
-    const taskLabelFromMeta = epData.task_label || epData.task_name || epData.task || '';
+    let taskLabelFromMeta = epData.task_label || epData.task_name || epData.task || '';
+    // Handle "tasks" field which is an array of task strings (LeRobot v2.0 format)
+    if (!taskLabelFromMeta && epData.tasks) {
+      if (Array.isArray(epData.tasks)) {
+        taskLabelFromMeta = epData.tasks.join('; ');
+      } else if (typeof epData.tasks === 'string') {
+        taskLabelFromMeta = epData.tasks;
+      }
+    }
     if (taskLabelFromMeta) {
       taskName.value = typeof taskLabelFromMeta === 'string' ? taskLabelFromMeta : '';
     }
