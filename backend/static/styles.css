@@ -201,6 +201,38 @@ video {
   background: #050505;
 }
 
+/* Multi-video grid: shown when "Show all cameras" is enabled */
+.video-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.video-grid-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.video-grid-item video {
+  max-height: 240px;
+}
+
+.video-grid-item .video-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  text-align: center;
+}
+
+.video-grid-item.is-primary .video-label {
+  color: #06b6d4;
+  background: rgba(6, 182, 212, 0.1);
+}
+
 .no-video-message {
   display: flex;
   flex-direction: column;
