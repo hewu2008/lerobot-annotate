@@ -75,6 +75,10 @@
 
         <div class="video-shell">
           <video id="episodeVideo" controls preload="metadata" style="display:none;"></video>
+          <div id="episodeVideoLoading" class="video-loading" style="display:none;">
+            <div class="spinner"></div>
+            <span>Loading video...</span>
+          </div>
           <div id="noVideoMessage" class="no-video-message" style="display:none;">
             <p>No video available for this dataset.</p>
             <p class="muted">You can still annotate episodes using frame-based timestamps.</p>

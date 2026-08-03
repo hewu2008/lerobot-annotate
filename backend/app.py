@@ -25,6 +25,15 @@ EXPORT_ROOT = Path(os.environ.get("LEROBOT_ANNOTATE_EXPORT", "/tmp/lerobot_annot
 TRIMMED_VIDEO_CACHE = CACHE_ROOT / "trimmed_videos"
 
 
+def _get_ffmpeg_exe() -> str:
+    """Get the ffmpeg executable path, preferring imageio-ffmpeg's bundled version."""
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return "ffmpeg"
+
+
 def trim_video_with_ffmpeg(input_path: Path, output_path: Path, start_time: float, end_time: float) -> bool:
     """Trim a video using FFmpeg to extract only the specified time range.
     
@@ -48,8 +57,9 @@ def trim_video_with_ffmpeg(input_path: Path, output_path: Path, start_time: floa
         # -ss before -i for fast seeking, -t for duration
         # -c copy for fast copying without re-encoding (if possible)
         # -avoid_negative_ts make_zero to handle timestamp issues
+        ffmpeg_exe = _get_ffmpeg_exe()
         cmd = [
-            "ffmpeg",
+            ffmpeg_exe,
             "-y",  # Overwrite output file if exists
             "-ss", str(start_time),  # Start time (before -i for input seeking)
             "-i", str(input_path),
@@ -237,7 +247,12 @@ class DataManager:
 
     def _get_video_keys(self) -> list[str]:
         features = self.info.get("features", {}) if self.info else {}
-        return sorted([key for key, meta in features.items() if meta.get("dtype") == "video"])
+        video_keys = sorted([key for key, meta in features.items() if meta.get("dtype") == "video"])
+        if not video_keys:
+            # For v2.0 datasets without separate video files, use image features
+            # Image features (dtype: "image") contain frame data in parquet files
+            video_keys = sorted([key for key, meta in features.items() if meta.get("dtype") == "image"])
+        return video_keys
 
     def _load_existing_annotations(self) -> None:
         self.annotations = {}
@@ -371,32 +386,145 @@ class DataManager:
             raise HTTPException(status_code=404, detail=f"Episode {episode_index} not found")
         row = row.iloc[0]
 
+        # First try the video-based approach (v1.x format with separate video files)
         chunk_col = f"videos/{video_key}/chunk_index"
         file_col = f"videos/{video_key}/file_index"
-        if chunk_col not in row or file_col not in row:
-            raise HTTPException(status_code=400, detail=f"Video key '{video_key}' not available for this dataset")
+        if chunk_col in row and file_col in row:
+            chunk_index = int(row[chunk_col])
+            file_index = int(row[file_col])
+            rel_path = self.info.get("video_path") or "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4"
+            rel_path = rel_path.format(video_key=video_key, chunk_index=chunk_index, file_index=file_index)
+            full_path = (self.dataset_root / rel_path).resolve()
 
-        chunk_index = int(row[chunk_col])
-        file_index = int(row[file_col])
-        rel_path = self.info.get("video_path") or "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4"
-        rel_path = rel_path.format(video_key=video_key, chunk_index=chunk_index, file_index=file_index)
-        full_path = (self.dataset_root / rel_path).resolve()
-
-        if full_path.exists():
-            return full_path
-
-        if self.source == "hf" and self.repo_id:
-            hf_hub_download(
-                repo_id=self.repo_id,
-                repo_type="dataset",
-                filename=rel_path,
-                revision=self.revision,
-                local_dir=self.dataset_root,
-            )
             if full_path.exists():
                 return full_path
 
-        raise HTTPException(status_code=404, detail=f"Video file not found: {full_path}")
+            if self.source == "hf" and self.repo_id:
+                hf_hub_download(
+                    repo_id=self.repo_id,
+                    repo_type="dataset",
+                    filename=rel_path,
+                    revision=self.revision,
+                    local_dir=self.dataset_root,
+                )
+                if full_path.exists():
+                    return full_path
+
+        # Fall back to image-based approach (v2.0 format: frames stored in parquet)
+        if self._is_image_feature(video_key):
+            return self._generate_video_from_parquet(episode_index, video_key)
+
+        raise HTTPException(status_code=404, detail=f"Video file not found for key '{video_key}'")
+
+    def _is_image_feature(self, video_key: str) -> bool:
+        """Check if a feature key is an image feature (frames stored in parquet)."""
+        features = self.info.get("features", {}) if self.info else {}
+        meta = features.get(video_key, {})
+        return meta.get("dtype") == "image"
+
+    def _get_episode_parquet_path(self, episode_index: int) -> Path:
+        """Get the parquet file path for a given episode index."""
+        if self.dataset_root is None:
+            raise HTTPException(status_code=400, detail="Dataset not loaded")
+        info = self.info or {}
+        data_path = info.get("data_path", "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet")
+        # Calculate chunk from episode_index
+        chunks_size = info.get("chunks_size", 1000)
+        chunk_index = episode_index // chunks_size
+        rel_path = data_path.format(episode_chunk=chunk_index, episode_index=episode_index)
+        return (self.dataset_root / rel_path).resolve()
+
+    def _generate_video_from_parquet(self, episode_index: int, video_key: str) -> Path:
+        """Extract image frames from parquet and generate an MP4 video.
+        
+        Args:
+            episode_index: The episode index
+            video_key: The image feature key (e.g., 'observation.images.cam_high')
+            
+        Returns:
+            Path to the generated MP4 video file
+        """
+        import imageio_ffmpeg
+
+        parquet_path = self._get_episode_parquet_path(episode_index)
+        if not parquet_path.exists():
+            raise HTTPException(status_code=404, detail=f"Parquet file not found: {parquet_path}")
+
+        # Create cache directory
+        CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+        cache_dir = CACHE_ROOT / "generated_videos"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate cache path
+        cache_key = f"{episode_index}_{video_key.replace('/', '_').replace('.', '_')}"
+        cache_path = cache_dir / f"ep{episode_index}_{cache_key[:32]}.mp4"
+
+        if cache_path.exists() and cache_path.stat().st_size > 0:
+            return cache_path
+
+        # Read parquet file
+        df = pd.read_parquet(parquet_path)
+        if video_key not in df.columns:
+            raise HTTPException(status_code=400, detail=f"Column '{video_key}' not found in parquet. Available: {list(df.columns)}")
+
+        # Sort by frame_index if available
+        if "frame_index" in df.columns:
+            df = df.sort_values("frame_index")
+
+        fps = float(self.info.get("fps", 30)) if self.info else 30.0
+        frame_data_list = df[video_key].tolist()
+
+        # Create temp directory for frames
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+
+            # Write frames as PNG files
+            for i, frame_data in enumerate(frame_data_list):
+                if frame_data is None:
+                    continue
+                if isinstance(frame_data, dict) and "bytes" in frame_data:
+                    img_bytes = frame_data["bytes"]
+                elif isinstance(frame_data, bytes):
+                    img_bytes = frame_data
+                else:
+                    continue
+
+                frame_path = tmpdir_path / f"frame_{i:06d}.png"
+                frame_path.write_bytes(img_bytes)
+
+            # Use ffmpeg to encode frames into MP4
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+            frame_pattern = str(tmpdir_path / "frame_%06d.png")
+            cmd = [
+                ffmpeg_exe,
+                "-y",                    # overwrite output
+                "-framerate", str(int(fps)),
+                "-i", frame_pattern,
+                "-c:v", "libx264",       # H.264 codec
+                "-pix_fmt", "yuv420p",   # compatible pixel format
+                "-crf", "23",            # quality (lower = better)
+                "-preset", "medium",     # encoding speed
+                str(cache_path),
+            ]
+
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                if result.returncode != 0:
+                    print(f"FFmpeg error: {result.stderr}")
+                    raise HTTPException(status_code=500, detail=f"Failed to encode video: {result.stderr[:200]}")
+            except subprocess.TimeoutExpired:
+                raise HTTPException(status_code=500, detail="Video encoding timed out")
+
+        if not cache_path.exists():
+            raise HTTPException(status_code=500, detail="Video generation failed")
+
+        return cache_path
 
     def get_episode_annotations(self, episode_index: int) -> EpisodeAnnotations:
         if episode_index not in self.annotations:
@@ -909,8 +1037,12 @@ def stream_video(episode_index: int, request: Request, video_key: str | None = N
 def get_video_duration(video_path: Path) -> float:
     """Get the duration of a video file using FFprobe."""
     try:
+        ffmpeg_exe = _get_ffmpeg_exe()
+        # ffprobe is typically alongside ffmpeg
+        import os as _os
+        ffprobe_exe = ffmpeg_exe.replace("ffmpeg", "ffprobe") if "ffmpeg" in ffmpeg_exe else "ffprobe"
         cmd = [
-            "ffprobe",
+            ffprobe_exe,
             "-v", "error",
             "-show_entries", "format=duration",
             "-of", "default=noprint_wrappers=1:nokey=1",

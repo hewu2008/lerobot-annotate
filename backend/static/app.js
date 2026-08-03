@@ -137,6 +137,7 @@ const episodeSearch = document.getElementById('episodeSearch');
 const episodeTitle = document.getElementById('episodeTitle');
 const episodeMeta = document.getElementById('episodeMeta');
 const episodeVideo = document.getElementById('episodeVideo');
+const episodeVideoLoading = document.getElementById('episodeVideoLoading');
 const noVideoMessage = document.getElementById('noVideoMessage');
 const timeline = document.getElementById('timeline');
 
@@ -166,6 +167,16 @@ const highLevelList = document.getElementById('highLevelList');
 const exportBtn = document.getElementById('exportBtn');
 const outputDir = document.getElementById('outputDir');
 const copyVideos = document.getElementById('copyVideos');
+
+// Reload video when video key changes
+videoKeySelect.addEventListener('change', () => {
+  if (state.dataset) {
+    state.dataset.selected_video_key = videoKeySelect.value;
+    if (state.currentEpisode !== null) {
+      selectEpisode(state.currentEpisode);
+    }
+  }
+});
 const exportStatus = document.getElementById('exportStatus');
 
 // Push to Hub elements
@@ -523,12 +534,17 @@ async function selectEpisode(epIdx) {
     episodeVideo.src = videoUrl;
     episodeVideo.style.display = '';
     noVideoMessage.style.display = 'none';
+    episodeVideoLoading.style.display = '';
+    episodeVideo.addEventListener('loadeddata', () => {
+      episodeVideoLoading.style.display = 'none';
+    }, { once: true });
   } else {
     // No video available for this dataset
     episodeVideo.removeAttribute('src');
     episodeVideo.load();
     episodeVideo.style.display = 'none';
     noVideoMessage.style.display = '';
+    episodeVideoLoading.style.display = 'none';
   }
   
   resetEpisodeForm();
@@ -585,7 +601,7 @@ connectForm.addEventListener('submit', async (event) => {
     // Show no-video message if dataset has no video
     if (data.selected_video_key) {
       noVideoMessage.style.display = 'none';
-      episodeVideo.style.display = 'none';
+      episodeVideo.style.display = 'none';  // Will show when episode is selected
     } else {
       noVideoMessage.style.display = '';
       episodeVideo.style.display = 'none';
@@ -610,7 +626,15 @@ function populateVideoKeys(keys, selected) {
   keys.forEach(key => {
     const option = document.createElement('option');
     option.value = key;
-    option.textContent = key;
+    // Show a shortened, more readable label
+    let label = key;
+    if (key.startsWith('observation.images.')) {
+      label = key.replace('observation.images.', '');
+    } else if (key.startsWith('videos/')) {
+      label = key.replace('videos/', '');
+    }
+    option.textContent = label;
+    option.title = key;  // Show full key on hover
     if (key === selected) option.selected = true;
     videoKeySelect.appendChild(option);
   });
