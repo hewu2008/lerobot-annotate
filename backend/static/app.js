@@ -137,6 +137,7 @@ const episodeSearch = document.getElementById('episodeSearch');
 const episodeTitle = document.getElementById('episodeTitle');
 const episodeMeta = document.getElementById('episodeMeta');
 const episodeVideo = document.getElementById('episodeVideo');
+const noVideoMessage = document.getElementById('noVideoMessage');
 const timeline = document.getElementById('timeline');
 
 const saveEpisodeBtn = document.getElementById('saveEpisode');
@@ -215,6 +216,10 @@ function formatDuration(seconds) {
 function currentTime() {
   // The server now returns trimmed videos, so currentTime is the actual episode time
   // Use 3 decimal places for millisecond precision
+  if (!state.dataset || !state.dataset.selected_video_key) {
+    // No video available, return 0 as default
+    return 0;
+  }
   return Number(episodeVideo.currentTime.toFixed(3));
 }
 
@@ -230,6 +235,16 @@ function formatTimeWithMs(seconds) {
 function updateTimeDisplay() {
   const currentTimeDisplay = document.getElementById('currentTimeDisplay');
   const totalTimeDisplay = document.getElementById('totalTimeDisplay');
+  if (!state.dataset || !state.dataset.selected_video_key) {
+    // No video available, use episode data
+    if (currentTimeDisplay) {
+      currentTimeDisplay.textContent = '00:00.000';
+    }
+    if (totalTimeDisplay && state.currentEpisodeData) {
+      totalTimeDisplay.textContent = formatTimeWithMs(state.currentEpisodeData.duration);
+    }
+    return;
+  }
   if (currentTimeDisplay) {
     currentTimeDisplay.textContent = formatTimeWithMs(episodeVideo.currentTime);
   }
@@ -240,6 +255,13 @@ function updateTimeDisplay() {
 
 function getEpisodeDuration() {
   // The server returns trimmed videos, so video duration = episode duration
+  // When no video is available, use the episode duration from the dataset
+  if (!state.dataset || !state.dataset.selected_video_key) {
+    if (state.currentEpisodeData && state.currentEpisodeData.duration) {
+      return state.currentEpisodeData.duration;
+    }
+    return 0;
+  }
   return episodeVideo.duration || 0;
 }
 
@@ -494,11 +516,20 @@ async function selectEpisode(epIdx) {
     high_levels: data.high_levels || [],
   };
 
-  // The server now handles video trimming for concatenated videos
-  // It will return only the portion of video for this specific episode
-  const videoUrl = `/api/video/${epIdx}?video_key=${encodeURIComponent(state.dataset.selected_video_key)}`;
-  console.log(`Loading episode ${epIdx} video`);
-  episodeVideo.src = videoUrl;
+  // Load video only if the dataset has video keys
+  if (state.dataset && state.dataset.selected_video_key) {
+    const videoUrl = `/api/video/${epIdx}?video_key=${encodeURIComponent(state.dataset.selected_video_key)}`;
+    console.log(`Loading episode ${epIdx} video`);
+    episodeVideo.src = videoUrl;
+    episodeVideo.style.display = '';
+    noVideoMessage.style.display = 'none';
+  } else {
+    // No video available for this dataset
+    episodeVideo.removeAttribute('src');
+    episodeVideo.load();
+    episodeVideo.style.display = 'none';
+    noVideoMessage.style.display = '';
+  }
   
   resetEpisodeForm();
   renderEpisodes();
@@ -551,6 +582,14 @@ connectForm.addEventListener('submit', async (event) => {
     setHelper(connectHelper, `Loaded ${state.episodes.length} episodes.`, true);
     workspace.style.display = 'grid';
     populateVideoKeys(data.video_keys, data.selected_video_key);
+    // Show no-video message if dataset has no video
+    if (data.selected_video_key) {
+      noVideoMessage.style.display = 'none';
+      episodeVideo.style.display = 'none';
+    } else {
+      noVideoMessage.style.display = '';
+      episodeVideo.style.display = 'none';
+    }
     renderEpisodes();
   } catch (err) {
     setStatus('Disconnected');
@@ -560,7 +599,14 @@ connectForm.addEventListener('submit', async (event) => {
 
 function populateVideoKeys(keys, selected) {
   videoKeySelect.innerHTML = '';
-  if (!keys) return;
+  if (!keys || keys.length === 0) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'No video keys (no video available)';
+    option.disabled = true;
+    videoKeySelect.appendChild(option);
+    return;
+  }
   keys.forEach(key => {
     const option = document.createElement('option');
     option.value = key;

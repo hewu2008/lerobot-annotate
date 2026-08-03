@@ -187,14 +187,14 @@ class DataManager:
         self.episodes_df = self._load_episodes(self.dataset_root)
 
         video_keys = self._get_video_keys()
-        if not video_keys:
-            raise HTTPException(status_code=400, detail="Dataset has no video keys")
-        self.video_key = req.video_key or video_keys[0]
-        if self.video_key not in video_keys:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Video key '{self.video_key}' not found. Available: {', '.join(video_keys)}",
-            )
+        self.video_key = None
+        if video_keys:
+            self.video_key = req.video_key or video_keys[0]
+            if self.video_key not in video_keys:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Video key '{self.video_key}' not found. Available: {', '.join(video_keys)}",
+                )
 
         self.annotations_path = self.dataset_root / "meta" / "lerobot_annotations.json"
         self._load_existing_annotations()
@@ -207,17 +207,33 @@ class DataManager:
         return json.loads(info_path.read_text())
 
     def _load_episodes(self, root: Path) -> pd.DataFrame:
+        # First try the v1.x format: meta/episodes/ directory with parquet files
         episodes_root = root / "meta" / "episodes"
-        if not episodes_root.exists():
-            raise HTTPException(status_code=404, detail=f"Missing episodes directory at {episodes_root}")
-        files = sorted(episodes_root.rglob("*.parquet"))
-        if not files:
-            raise HTTPException(status_code=404, detail="No episodes parquet files found")
-        dfs = [pd.read_parquet(path) for path in files]
-        df = pd.concat(dfs, ignore_index=True)
-        if "episode_index" not in df.columns:
-            raise HTTPException(status_code=400, detail="episodes parquet missing 'episode_index' column")
-        return df.sort_values("episode_index").reset_index(drop=True)
+        if episodes_root.is_dir():
+            files = sorted(episodes_root.rglob("*.parquet"))
+            if files:
+                dfs = [pd.read_parquet(path) for path in files]
+                df = pd.concat(dfs, ignore_index=True)
+                if "episode_index" not in df.columns:
+                    raise HTTPException(status_code=400, detail="episodes parquet missing 'episode_index' column")
+                return df.sort_values("episode_index").reset_index(drop=True)
+
+        # Fall back to v2.0 format: meta/episodes.jsonl
+        episodes_jsonl = root / "meta" / "episodes.jsonl"
+        if episodes_jsonl.exists():
+            records = []
+            with open(episodes_jsonl) as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        records.append(json.loads(line))
+            if records:
+                df = pd.DataFrame(records)
+                if "episode_index" not in df.columns:
+                    raise HTTPException(status_code=400, detail="episodes.jsonl missing 'episode_index' column")
+                return df.sort_values("episode_index").reset_index(drop=True)
+
+        raise HTTPException(status_code=404, detail=f"No episodes data found. Looked for {episodes_root} (directory) and {episodes_jsonl} (file)")
 
     def _get_video_keys(self) -> list[str]:
         features = self.info.get("features", {}) if self.info else {}
@@ -812,6 +828,7 @@ def get_episode_video_timing(episode_index: int, video_key: str | None = None) -
         "duration": duration,
         "video_start_time": video_info["video_start_time"],
         "video_end_time": video_info["video_end_time"],
+        "has_video": video_key is not None,
     })
 
 
@@ -823,6 +840,8 @@ def stream_video(episode_index: int, request: Request, video_key: str | None = N
     will trim the video to only include the relevant episode portion using FFmpeg.
     """
     video_key = video_key or manager.video_key
+    if not video_key:
+        raise HTTPException(status_code=400, detail="No video key available for this dataset")
     original_path = manager.get_episode_video_path(episode_index, video_key=video_key)
     
     # Get the video timing for this episode
