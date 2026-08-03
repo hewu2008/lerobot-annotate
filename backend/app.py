@@ -1042,9 +1042,14 @@ def get_episode_trajectory(episode_index: int) -> JSONResponse:
     state_data = {}
 
     action_col = "action"
-    state_col = "state"
+    action_col_alt = "observation.action"
+    state_col = "observation.state"
+    state_col_alt = "state"
 
-    if action_col in df.columns:
+    action_col = action_col if action_col in df.columns else (action_col_alt if action_col_alt in df.columns else None)
+    state_col = state_col if state_col in df.columns else (state_col_alt if state_col_alt in df.columns else None)
+
+    if action_col and action_col in df.columns:
         raw_actions = df[action_col].tolist()
         if raw_actions and isinstance(raw_actions[0], (list, tuple, np.ndarray)):
             n_dims = len(raw_actions[0])
@@ -1060,8 +1065,9 @@ def get_episode_trajectory(episode_index: int) -> JSONResponse:
         else:
             action_data["action"] = [float(a) if a is not None else None for a in raw_actions]
 
-    if state_col in df.columns:
+    if state_col and state_col in df.columns:
         raw_states = df[state_col].tolist()
+        col_short = state_col.split(".")[-1]
         if raw_states and isinstance(raw_states[0], (list, tuple, np.ndarray)):
             n_dims = len(raw_states[0])
             dim_names = []
@@ -1074,7 +1080,7 @@ def get_episode_trajectory(episode_index: int) -> JSONResponse:
                 name = dim_names[i] if i < len(dim_names) else f"dim_{i}"
                 state_data[name] = [float(s[i]) if s is not None and i < len(s) else None for s in raw_states]
         else:
-            state_data["state"] = [float(s) if s is not None else None for s in raw_states]
+            state_data[col_short] = [float(s) if s is not None else None for s in raw_states]
 
     columns = [c for c in df.columns if c not in ("frame_index",)]
 
