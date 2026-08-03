@@ -1114,11 +1114,8 @@ addTask.addEventListener('click', async () => {
   ann.tasks = [{ start, end, name }];
   const ok = await saveEpisode();
   if (ok) {
-    showToast('Task saved successfully', 'success');
     renderEpisodes();
     renderLabelChips();
-  } else {
-    showToast('Failed to save task', 'error');
   }
 });
 
