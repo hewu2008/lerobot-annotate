@@ -488,9 +488,15 @@ class DataManager:
         cache_dir = CACHE_ROOT / "generated_videos"
         cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Generate cache path
-        cache_key = f"{episode_index}_{video_key.replace('/', '_').replace('.', '_')}"
-        cache_path = cache_dir / f"ep{episode_index}_{cache_key[:32]}.mp4"
+        # Generate cache path. Include dataset root and parquet mtime so that
+        # different datasets (or re-conversions that rewrite the parquet) get
+        # distinct cache entries instead of reusing a stale video.
+        parquet_mtime = parquet_path.stat().st_mtime_ns
+        dataset_root_str = str(self.dataset_root) if self.dataset_root else "none"
+        cache_key_str = f"{dataset_root_str}_{episode_index}_{video_key}_{parquet_mtime}"
+        cache_hash = hashlib.md5(cache_key_str.encode()).hexdigest()[:16]
+        safe_vk = video_key.replace('/', '_').replace('.', '_')
+        cache_path = cache_dir / f"ep{episode_index}_{safe_vk[:24]}_{cache_hash}.mp4"
 
         if cache_path.exists() and cache_path.stat().st_size > 0:
             return cache_path
@@ -512,19 +518,41 @@ class DataManager:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
 
-            # Write frames as PNG files
-            for i, frame_data in enumerate(frame_data_list):
+            # Write frames as PNG files. Use a separate contiguous counter
+            # (out_idx) for file naming so that skipped frames don't leave
+            # gaps in the sequence -- ffmpeg's frame_%06d.png input stops at
+            # the first missing file, which would truncate the video.
+            out_idx = 0
+            skipped = 0
+            for frame_data in frame_data_list:
                 if frame_data is None:
+                    skipped += 1
                     continue
                 if isinstance(frame_data, dict) and "bytes" in frame_data:
                     img_bytes = frame_data["bytes"]
+                elif isinstance(frame_data, dict) and "path" in frame_data:
+                    # Image stored as file reference without embedded bytes
+                    p = Path(frame_data["path"])
+                    if not p.is_absolute():
+                        p = (self.dataset_root / p) if self.dataset_root else p
+                    if not p.exists():
+                        skipped += 1
+                        continue
+                    img_bytes = p.read_bytes()
                 elif isinstance(frame_data, bytes):
                     img_bytes = frame_data
                 else:
+                    skipped += 1
                     continue
 
-                frame_path = tmpdir_path / f"frame_{i:06d}.png"
+                frame_path = tmpdir_path / f"frame_{out_idx:06d}.png"
                 frame_path.write_bytes(img_bytes)
+                out_idx += 1
+
+            if skipped > 0:
+                print(f"[VideoGen] Episode {episode_index} key '{video_key}': skipped {skipped}/{len(frame_data_list)} frames with no usable image data")
+            if out_idx == 0:
+                raise HTTPException(status_code=500, detail=f"No usable image frames found in parquet for key '{video_key}'")
 
             # Use ffmpeg to encode frames into MP4
             ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
