@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
+from datasets import Image as DatasetsImage
 from tqdm import tqdm
 
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
@@ -133,6 +134,16 @@ def process_dataset_with_annotations(
         use_videos=use_videos,
     )
 
+    # LeRobot sets a torch transform on hf_dataset (images -> float32
+    # tensors), which datasets.Image can't re-embed. Build a decode=False,
+    # identity-transform view so image columns surface as {bytes, path}
+    # dicts: _save_episode_table embeds the bytes verbatim into the dest
+    # parquet (no decode/re-encode, no PNG file round-trip, low memory).
+    image_keys = [k for k, v in features.items() if v.get("dtype") == "image"]
+    raw_ds = src.hf_dataset.with_transform(lambda b: b)
+    for k in image_keys:
+        raw_ds = raw_ds.cast_column(k, DatasetsImage(decode=False))
+
     # Timestamp column handle: per-frame trim check without reading full rows.
     ts_col = src.hf_dataset["timestamp"]
 
@@ -188,8 +199,9 @@ def process_dataset_with_annotations(
             continue
 
         # Copy kept frames into the episode buffer directly (bypassing
-        # add_frame). Image objects are embedded into the parquet by
-        # _save_episode_table via datasets.Image -- no PNG round-trip.
+        # add_frame). Image values are {bytes, path} dicts (see raw_ds above),
+        # embedded verbatim into the parquet by _save_episode_table -- no
+        # decode/re-encode, no PNG file round-trip.
         if dst.episode_buffer is None:
             dst.episode_buffer = dst.create_episode_buffer()
         buf = dst.episode_buffer
@@ -197,7 +209,7 @@ def process_dataset_with_annotations(
         frame_pbar = tqdm(kept_abs, desc=f"  Ep {ep_idx} frames", unit="frm",
                           leave=False, dynamic_ncols=True)
         for abs_idx in frame_pbar:
-            row = src.hf_dataset[abs_idx]
+            row = raw_ds[abs_idx]
             fi = buf["size"]
             buf["frame_index"].append(fi)
             buf["timestamp"].append(fi / fps)
