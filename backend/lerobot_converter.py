@@ -209,8 +209,7 @@ def process_dataset_with_annotations(
         frame_pbar.close()
 
         final_task = episode_task or "default"
-        with tqdm.external_write_mode(ep_pbar):
-            dst.save_episode(task=final_task, encode_videos=False)
+        dst.save_episode(task=final_task, encode_videos=False)
         tasks_set.add(final_task)
         kept_episodes += 1
         total_frames += added
