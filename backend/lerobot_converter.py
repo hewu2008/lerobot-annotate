@@ -301,7 +301,7 @@ def process_dataset_with_annotations(
     # Consolidate: compute stats, write stats.json.
     _emit({"type": "phase", "phase": "consolidating"})
     print("[Process] Consolidating dataset (computing statistics)...")
-    dst.consolidate(run_compute_stats=True, keep_image_files=False)
+    dst.consolidate(run_compute_stats=False, keep_image_files=False)
     print("[Process] Consolidation complete")
 
     # Write subtask mapping as JSONL (consistent with tasks.jsonl in the
