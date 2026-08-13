@@ -57,6 +57,31 @@ def _get_task_time_ranges(ann_tasks: list[dict[str, Any]]) -> list[tuple[float, 
     return sorted(ranges, key=lambda x: x[0])
 
 
+def _find_segment_index(
+    timestamp: float,
+    segments: list[dict[str, Any]],
+    mapping: dict[str, int],
+    label_key: str,
+) -> int:
+    """Find the mapped index of the segment containing *timestamp*.
+
+    Mirrors the matching logic of ``assign_indices_by_segments`` in app.py:
+    a frame belongs to a segment if ``start <= ts < end``, with the last
+    segment also accepting ``ts == end``.
+    """
+    if not segments:
+        return -1
+    segments_sorted = sorted(segments, key=lambda s: float(s.get("start", 0)))
+    for seg_idx, seg in enumerate(segments_sorted):
+        start = float(seg.get("start", 0))
+        end = float(seg.get("end", 0))
+        is_last = seg_idx == len(segments_sorted) - 1
+        if (start <= timestamp < end) or (is_last and timestamp <= end):
+            label = seg.get(label_key, "")
+            return mapping.get(label, -1)
+    return -1
+
+
 def process_dataset_with_annotations(
     dataset_root: Path,
     annotations: dict[int, Any],
@@ -108,13 +133,20 @@ def process_dataset_with_annotations(
     )
 
     fps = src.fps
-    features = src.features
+    features = dict(src.features)
+    # Add subtask_index feature so LeRobotDataset.create includes it in the
+    # schema and info.json.
+    features["subtask_index"] = {"dtype": "int64", "shape": (1,), "names": None}
     use_videos = len(src.meta.video_keys) > 0
     original_episodes = src.meta.total_episodes
 
     # Features that must be provided per-frame (everything LeRobot does not
-    # manage automatically).
-    data_feature_keys = [k for k in features if k not in DEFAULT_FEATURES]
+    # manage automatically).  ``subtask_index`` is computed from annotations,
+    # not copied from the source row, so it is excluded here and handled
+    # explicitly in the frame loop.
+    data_feature_keys = [
+        k for k in features if k not in DEFAULT_FEATURES and k != "subtask_index"
+    ]
 
     _emit({"type": "phase", "phase": "processing", "total_episodes": original_episodes})
 
@@ -146,6 +178,16 @@ def process_dataset_with_annotations(
 
     # Timestamp column handle: per-frame trim check without reading full rows.
     ts_col = src.hf_dataset["timestamp"]
+
+    # Build subtask label → index mapping from all annotations (same logic
+    # as build_subtasks_dataframe in app.py).
+    subtask_labels = sorted({
+        seg["label"]
+        for ann in annotations.values()
+        for seg in (ann.subtasks if ann else [])
+        if seg.get("label")
+    })
+    subtask_map = {label: idx for idx, label in enumerate(subtask_labels)}
 
     tasks_set: set[str] = set()
     kept_episodes = 0
@@ -205,6 +247,9 @@ def process_dataset_with_annotations(
         if dst.episode_buffer is None:
             dst.episode_buffer = dst.create_episode_buffer()
         buf = dst.episode_buffer
+        # Ensure the subtask_index column exists in the buffer
+        if "subtask_index" not in buf:
+            buf["subtask_index"] = []
         added = 0
         frame_pbar = tqdm(kept_abs, desc=f"  Ep {ep_idx} frames", unit="frm",
                           leave=False, dynamic_ncols=True)
@@ -216,6 +261,12 @@ def process_dataset_with_annotations(
             for key in data_feature_keys:
                 if key in row:
                     buf[key].append(row[key])
+            # Assign subtask_index using the original timestamp (before
+            # re-indexing) so the value matches the annotation time segment.
+            orig_ts = float(ts_col[abs_idx])
+            buf["subtask_index"].append(
+                _find_segment_index(orig_ts, ann.subtasks if ann else [], subtask_map, "label")
+            )
             buf["size"] += 1
             added += 1
         frame_pbar.close()
@@ -253,6 +304,31 @@ def process_dataset_with_annotations(
     dst.consolidate(run_compute_stats=True, keep_image_files=False)
     print("[Process] Consolidation complete")
 
+    # Write subtask mapping as JSONL (consistent with tasks.jsonl in the
+    # LeRobot v2 standard).
+    meta_dir = output_dir / "meta"
+    meta_dir.mkdir(parents=True, exist_ok=True)
+
+    if subtask_map:
+        subtask_rows = [
+            {"subtask": label, "subtask_index": idx}
+            for label, idx in subtask_map.items()
+        ]
+        with open(meta_dir / "subtasks.jsonl", "w") as f:
+            for rec in subtask_rows:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+    # Ensure info.json declares the subtask_index feature (consolidate may
+    # have rewritten info.json; use setdefault so we don't clobber existing keys).
+    info_path = meta_dir / "info.json"
+    if info_path.exists():
+        info_data = json.loads(info_path.read_text())
+        info_data.setdefault("features", {})
+        info_data["features"].setdefault(
+            "subtask_index", {"dtype": "int64", "shape": (1,), "names": None}
+        )
+        info_path.write_text(json.dumps(info_data, indent=2))
+
     task_names_sorted = sorted(tasks_set)
     summary = {
         "output_dir": str(output_dir),
@@ -260,6 +336,7 @@ def process_dataset_with_annotations(
         "total_frames": total_frames,
         "total_tasks": len(task_names_sorted),
         "tasks": task_names_sorted,
+        "total_subtasks": len(subtask_map),
         "deleted_episodes": sorted(deleted_episodes),
         "original_episodes": original_episodes,
         "kept_episodes": kept_episodes,

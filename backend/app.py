@@ -650,15 +650,15 @@ class DataManager:
         info.setdefault("features", {})
         info["features"].setdefault(
             "subtask_index",
-            {"dtype": "int64", "shape": [1], "names": None},
+            {"dtype": "int64", "shape": (1,), "names": None},
         )
         info["features"].setdefault(
             "task_index_high_level",
-            {"dtype": "int64", "shape": [1], "names": None},
+            {"dtype": "int64", "shape": (1,), "names": None},
         )
         info["features"].setdefault(
             "task_index",
-            {"dtype": "int64", "shape": [1], "names": None},
+            {"dtype": "int64", "shape": (1,), "names": None},
         )
         info_path.write_text(json.dumps(info, indent=2))
 
