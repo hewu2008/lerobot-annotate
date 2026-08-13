@@ -1,3 +1,21 @@
 #!/bin/bash
 
-uvicorn backend.app:app --reload --host 0.0.0.0 --port 7860
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUNTIME_DIR="${PROJECT_ROOT}/runtime"
+LOG_FILE="${RUNTIME_DIR}/backend.log"
+
+mkdir -p "${RUNTIME_DIR}"
+
+SESSION_NAME="lerobot_annotate_backend"
+
+if screen -list | grep -q "${SESSION_NAME}"; then
+    echo "Screen session '${SESSION_NAME}' already exists. Killing it..."
+    screen -S "${SESSION_NAME}" -X quit
+    sleep 1
+fi
+
+screen -dmS "${SESSION_NAME}" bash -c "cd '${PROJECT_ROOT}' && uvicorn backend.app:app --reload --host 0.0.0.0 --port 7860 2>&1 | tee '${LOG_FILE}'"
+
+echo "Backend started in screen session '${SESSION_NAME}'"
+echo "Log file: ${LOG_FILE}"
+echo "Attach with: screen -r ${SESSION_NAME}"
