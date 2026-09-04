@@ -1328,11 +1328,13 @@ addSubtask.addEventListener('click', () => {
   }
   const ann = getEpisodeAnnotations(state.currentEpisode);
   ann.subtasks.push({ start, end, label });
+  // Update the start input to the new subtask's end BEFORE rendering, in case render functions touch the form
+  subtaskStart.value = end;
+  subtaskLabel.value = '';
   renderSubtasks();
   renderTimeline();
   renderEpisodes();
   renderLabelChips();
-  subtaskLabel.value = '';
 });
 
 hlSetStart.addEventListener('click', () => {

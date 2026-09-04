@@ -19,6 +19,8 @@ from fastapi.staticfiles import StaticFiles
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from pydantic import BaseModel
 
+from . import raw_dataset as raw_ds
+from .hdf5_exporter import convert_raw_to_lerobot
 from .lerobot_converter import process_dataset_with_annotations
 
 APP_ROOT = Path(__file__).resolve().parent
@@ -165,12 +167,14 @@ class EpisodeAnnotations:
 class DataManager:
     def __init__(self) -> None:
         self.source: str | None = None
+        self.mode: str = "lerobot"  # "lerobot" (LeRobot dataset layout) or "raw" (raw HDF5 collection)
         self.repo_id: str | None = None
         self.revision: str | None = None
         self.dataset_root: Path | None = None
         self.info: dict[str, Any] | None = None
         self.episodes_df: pd.DataFrame | None = None
         self.video_key: str | None = None
+        self.raw_info: raw_ds.RawDatasetInfo | None = None
         self.annotations: dict[int, EpisodeAnnotations] = {}
         self.annotations_path: Path | None = None
         self.deleted_episodes: set[int] = set()
@@ -180,8 +184,10 @@ class DataManager:
             raise HTTPException(status_code=400, detail="source must be 'hf' or 'local'")
 
         self.source = req.source
+        self.mode = "lerobot"
         self.repo_id = req.repo_id
         self.revision = req.revision
+        self.raw_info = None
 
         if req.source == "local":
             if not req.local_path:
@@ -190,6 +196,8 @@ class DataManager:
             if not root.exists():
                 raise HTTPException(status_code=404, detail=f"Dataset path not found: {root}")
             self.dataset_root = root
+            if raw_ds.is_raw_collection(root):
+                return self._load_raw_dataset(root, req)
         else:
             if not req.repo_id:
                 raise HTTPException(status_code=400, detail="repo_id is required for hf source")
@@ -220,6 +228,37 @@ class DataManager:
 
         self.annotations_path = self.dataset_root / "meta" / "lerobot_annotations.json"
         self._load_existing_annotations()
+        return self._build_summary()
+
+    def _load_raw_dataset(self, root: Path, req: DatasetLoadRequest) -> dict[str, Any]:
+        """Load a raw HDF5 collection folder in direct-read mode."""
+        self.mode = "raw"
+        try:
+            self.raw_info = raw_ds.scan_raw_dataset(root)
+        except RuntimeError as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        self.info = self.raw_info.info
+        self.episodes_df = self.raw_info.episodes_df
+
+        video_keys = self._get_video_keys()
+        self.video_key = None
+        if video_keys:
+            self.video_key = req.video_key or video_keys[0]
+            if self.video_key not in video_keys:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Video key '{self.video_key}' not found. Available: {', '.join(video_keys)}",
+                )
+
+        self.annotations_path = root / "meta" / "lerobot_annotations.json"
+        self._load_existing_annotations()
+        print(
+            f"[Load] Raw collection mode: {len(self.raw_info.episodes)} episodes, "
+            f"fps={self.raw_info.fps}, video_keys={video_keys}"
+        )
         return self._build_summary()
 
     def _load_info(self, root: Path) -> dict[str, Any]:
@@ -414,6 +453,14 @@ class DataManager:
         if not video_key:
             raise HTTPException(status_code=400, detail="video_key is required")
 
+        if self.mode == "raw":
+            try:
+                return raw_ds.get_episode_video_path(self.raw_info, episode_index, video_key)
+            except IndexError:
+                raise HTTPException(status_code=404, detail=f"Episode {episode_index} not found")
+            except FileNotFoundError as e:
+                raise HTTPException(status_code=404, detail=str(e))
+
         row = self.episodes_df[self.episodes_df["episode_index"] == episode_index]
         if row.empty:
             raise HTTPException(status_code=404, detail=f"Episode {episode_index} not found")
@@ -426,7 +473,16 @@ class DataManager:
             chunk_index = int(row[chunk_col])
             file_index = int(row[file_col])
             rel_path = self.info.get("video_path") or "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4"
-            rel_path = rel_path.format(video_key=video_key, chunk_index=chunk_index, file_index=file_index)
+            # Supply both naming conventions so any info.json video_path
+            # template works (v1.x {chunk_index}/{file_index} and LeRobot
+            # v2.x {episode_chunk}/{episode_index}).
+            rel_path = rel_path.format(
+                video_key=video_key,
+                chunk_index=chunk_index,
+                file_index=file_index,
+                episode_chunk=chunk_index,
+                episode_index=file_index,
+            )
             full_path = (self.dataset_root / rel_path).resolve()
 
             if full_path.exists():
@@ -459,6 +515,8 @@ class DataManager:
         """Get the parquet file path for a given episode index."""
         if self.dataset_root is None:
             raise HTTPException(status_code=400, detail="Dataset not loaded")
+        if self.mode == "raw":
+            raise HTTPException(status_code=404, detail="Raw datasets have no parquet data files")
         info = self.info or {}
         data_path = info.get("data_path", "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet")
         # Calculate chunk from episode_index
@@ -618,6 +676,28 @@ class DataManager:
     def export_dataset(self, output_dir: str | None = None, copy_videos: bool = False) -> dict[str, Any]:
         if self.dataset_root is None or self.info is None:
             raise HTTPException(status_code=400, detail="Dataset not loaded")
+
+        if self.mode == "raw":
+            if output_dir:
+                out_root = Path(output_dir).expanduser().resolve()
+            else:
+                root = self.dataset_root
+                out_root = root.parent / f"{root.name}_annotated"
+            summary = convert_raw_to_lerobot(
+                raw_info=self.raw_info,
+                annotations=self.annotations,
+                deleted_episodes=self.deleted_episodes,
+                output_dir=out_root,
+                copy_videos=copy_videos,
+            )
+            return {
+                "output_dir": summary["output_dir"],
+                "total_episodes": summary["total_episodes"],
+                "total_frames": summary["total_frames"],
+                "subtasks": summary.get("total_subtasks", 0),
+                "tasks_high_level": summary.get("total_high_level_tasks", 0),
+                "tasks": summary.get("total_tasks", 0),
+            }
 
         if output_dir:
             out_root = Path(output_dir).expanduser().resolve()
@@ -948,6 +1028,9 @@ def convert_to_lerobot(payload: dict[str, Any]):
     output_dir_str = payload.get("output_dir")
     if output_dir_str:
         out_root = Path(output_dir_str).expanduser().resolve()
+    elif manager.mode == "raw":
+        root = manager.dataset_root
+        out_root = root.parent / f"{root.name}_annotated"
     else:
         EXPORT_ROOT.mkdir(parents=True, exist_ok=True)
         name = (manager.repo_id or "local_dataset").replace("/", "__")
@@ -963,14 +1046,23 @@ def convert_to_lerobot(payload: dict[str, Any]):
 
     def run_worker() -> None:
         try:
-            summary = process_dataset_with_annotations(
-                dataset_root=manager.dataset_root,
-                annotations=manager.annotations,
-                deleted_episodes=manager.deleted_episodes,
-                output_dir=out_root,
-                info=manager.info,
-                progress_callback=progress_cb,
-            )
+            if manager.mode == "raw":
+                summary = convert_raw_to_lerobot(
+                    raw_info=manager.raw_info,
+                    annotations=manager.annotations,
+                    deleted_episodes=manager.deleted_episodes,
+                    output_dir=out_root,
+                    progress_callback=progress_cb,
+                )
+            else:
+                summary = process_dataset_with_annotations(
+                    dataset_root=manager.dataset_root,
+                    annotations=manager.annotations,
+                    deleted_episodes=manager.deleted_episodes,
+                    output_dir=out_root,
+                    info=manager.info,
+                    progress_callback=progress_cb,
+                )
         except FileNotFoundError as e:
             ev_queue.put({"type": "error", "detail": str(e)})
             return
@@ -1179,6 +1271,15 @@ def get_episode_trajectory(episode_index: int) -> JSONResponse:
     """Get action/state trajectory data for an episode from its parquet file."""
     if manager.dataset_root is None or manager.info is None:
         raise HTTPException(status_code=400, detail="Dataset not loaded")
+
+    if manager.mode == "raw":
+        try:
+            data = raw_ds.get_episode_trajectory(manager.raw_info, episode_index)
+        except IndexError:
+            raise HTTPException(status_code=404, detail=f"Episode {episode_index} not found")
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        return JSONResponse(data)
 
     parquet_path = manager._get_episode_parquet_path(episode_index)
     if not parquet_path.exists():

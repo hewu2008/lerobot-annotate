@@ -4,3 +4,4 @@ pydantic==1.10.15
 pandas==2.2.2
 pyarrow==15.0.2
 huggingface_hub==0.21.4
+h5py==3.16.0
