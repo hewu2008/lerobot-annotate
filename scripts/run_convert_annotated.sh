@@ -19,5 +19,5 @@
 export PYTHONPATH=`pwd`
 
 python -u -m backend.convert_cli \
-    --dataset-root /data/4T-2/dataset/EmbodiedLab/clear_the_bin_box_20260910 \
-    --output-dir /data/4T-2/dataset/EmbodiedLab/clear_the_bin_box_20260910_v1
+    --dataset-root /data/4T-2/dataset/EmbodiedLab/clear_the_bin_box_20261010 \
+    --output-dir /data/4T-2/dataset/EmbodiedLab/clear_the_bin_box_20261010_v1
