@@ -83,6 +83,18 @@
         </div>
 
         <div class="video-shell">
+          <div id="playbackSpeedControls" class="playback-speed-controls" style="display:none;">
+            <label for="playbackSpeed">Playback speed</label>
+            <select id="playbackSpeed" aria-label="Playback speed">
+              <option value="0.25">0.25x</option>
+              <option value="0.5">0.5x</option>
+              <option value="1" selected>1x</option>
+              <option value="2">2x</option>
+              <option value="3">3x</option>
+              <option value="4">4x</option>
+              <option value="5">5x</option>
+            </select>
+          </div>
           <video id="episodeVideo" controls preload="metadata" style="display:none;"></video>
           <div id="multiVideoControls" class="multi-video-controls" style="display:none;">
             <button id="multiPlayPause" class="multi-pp-btn" type="button" aria-label="Play/Pause">&#9654;</button>

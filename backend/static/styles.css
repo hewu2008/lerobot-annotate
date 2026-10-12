@@ -263,6 +263,18 @@ video {
   background: #050505;
 }
 
+.playback-speed-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.playback-speed-controls select {
+  padding: 6px 10px;
+}
+
 /* Multi-video grid: shown when "Show all cameras" is enabled */
 .multi-video-controls {
   display: flex;

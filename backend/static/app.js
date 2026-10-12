@@ -157,6 +157,8 @@ const episodeSearch = document.getElementById('episodeSearch');
 const episodeTitle = document.getElementById('episodeTitle');
 const episodeMeta = document.getElementById('episodeMeta');
 const episodeVideo = document.getElementById('episodeVideo');
+const playbackSpeedControls = document.getElementById('playbackSpeedControls');
+const playbackSpeedSelect = document.getElementById('playbackSpeed');
 const multiVideoGrid = document.getElementById('multiVideoGrid');
 const multiVideoControls = document.getElementById('multiVideoControls');
 const multiPlayPause = document.getElementById('multiPlayPause');
@@ -267,7 +269,34 @@ const state = {
   currentEpisode: null,
   currentEpisodeData: null, // Store the full episode data including video timing
   annotations: {},
+  playbackRate: 1,
 };
+
+function applyPlaybackRate(video, rate = state.playbackRate) {
+  video.defaultPlaybackRate = rate;
+  if (video.playbackRate !== rate) video.playbackRate = rate;
+}
+
+function setPlaybackRate(rate) {
+  if (!Number.isFinite(rate) || rate <= 0) return;
+  state.playbackRate = rate;
+  // Native single-video controls may offer additional speeds.
+  playbackSpeedSelect.querySelectorAll('[data-custom-rate]').forEach(option => option.remove());
+  if (!Array.from(playbackSpeedSelect.options).some(option => Number(option.value) === rate)) {
+    const option = document.createElement('option');
+    option.value = String(rate);
+    option.textContent = `${rate}x`;
+    option.dataset.customRate = 'true';
+    playbackSpeedSelect.appendChild(option);
+  }
+  playbackSpeedSelect.value = String(rate);
+  applyPlaybackRate(episodeVideo, rate);
+  multiVideoGrid.querySelectorAll('video').forEach(video => applyPlaybackRate(video, rate));
+}
+
+playbackSpeedSelect.addEventListener('change', () => {
+  setPlaybackRate(Number(playbackSpeedSelect.value));
+});
 
 function setStatus(text, ok = false) {
   statusEl.textContent = text;
@@ -737,6 +766,7 @@ async function renderMultiCameraGrid(epIdx) {
     video.controls = false;
     video.preload = 'metadata';
     video.src = `/api/video/${epIdx}?video_key=${encodeURIComponent(key)}`;
+    applyPlaybackRate(video);
     video.muted = key !== primaryKey;
 
     item.appendChild(video);
@@ -785,6 +815,7 @@ async function renderMultiCameraGrid(epIdx) {
 
   // Primary video events -> update control bar + sync secondaries
   primaryVideo.addEventListener('loadedmetadata', () => {
+    [primaryVideo, ...secondaryVideos].forEach(video => applyPlaybackRate(video));
     renderTimeline();
     updateTimeDisplay();
     updateSeekBar();
@@ -818,8 +849,9 @@ async function renderMultiCameraGrid(epIdx) {
     isSyncing = false;
   });
   primaryVideo.addEventListener('ratechange', () => {
-    const rate = primaryVideo.playbackRate;
-    secondaryVideos.forEach(v => { v.playbackRate = rate; });
+    if (getPrimaryVideoElement() === primaryVideo && primaryVideo.playbackRate !== state.playbackRate) {
+      setPlaybackRate(primaryVideo.playbackRate);
+    }
   });
 
   // Initial state
@@ -869,6 +901,7 @@ async function selectEpisode(epIdx) {
   // Load video only if the dataset has video keys
   if (state.dataset && state.dataset.selected_video_key) {
     noVideoMessage.style.display = 'none';
+    playbackSpeedControls.style.display = '';
 
     if (showAllVideos.checked && state.dataset.video_keys.length > 1) {
       episodeVideo.style.display = 'none';
@@ -878,6 +911,7 @@ async function selectEpisode(epIdx) {
       const videoUrl = `/api/video/${epIdx}?video_key=${encodeURIComponent(state.dataset.selected_video_key)}`;
       console.log(`Loading episode ${epIdx} video`);
       episodeVideo.src = videoUrl;
+      applyPlaybackRate(episodeVideo);
       episodeVideo.style.display = '';
       episodeVideoLoading.style.display = '';
       episodeVideo.addEventListener('loadeddata', () => {
@@ -886,6 +920,7 @@ async function selectEpisode(epIdx) {
     }
   } else {
     // No video available for this dataset
+    playbackSpeedControls.style.display = 'none';
     hideMultiCameraGrid();
     episodeVideo.removeAttribute('src');
     episodeVideo.load();
@@ -1261,6 +1296,8 @@ connectForm.addEventListener('submit', async (event) => {
       throw new Error(data.detail || 'Failed to load dataset');
     }
     state.dataset = data;
+    setPlaybackRate(1);
+    playbackSpeedControls.style.display = 'none';
     state.episodes = data.episodes || [];
     setStatus(`Loaded ${data.repo_id || data.root}`, true);
     setHelper(connectHelper, `Loaded ${state.episodes.length} episodes.`, true);
@@ -1446,9 +1483,16 @@ resetEpisodeBtn.addEventListener('click', () => {
 episodeSearch.addEventListener('input', renderEpisodes);
 
 episodeVideo.addEventListener('loadedmetadata', () => {
+  applyPlaybackRate(episodeVideo);
   // Server now returns trimmed videos, just render the timeline
   renderTimeline();
   updateTimeDisplay();
+});
+
+episodeVideo.addEventListener('ratechange', () => {
+  if (getPrimaryVideoElement() === episodeVideo && episodeVideo.playbackRate !== state.playbackRate) {
+    setPlaybackRate(episodeVideo.playbackRate);
+  }
 });
 
 // Update time display continuously during video playback
