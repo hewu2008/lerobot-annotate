@@ -19,5 +19,5 @@
 export PYTHONPATH=`pwd`
 
 python -u -m backend.convert_cli \
-    --dataset-root /data/4T-2/dataset/hewu2008/clear_the_bin_box_20261026 \
-    --output-dir /data/4T-2/dataset/hewu2008/clear_the_bin_box_20261026_clean
+    --dataset-root /data/4T-2/dataset/hewu2008/part_sorting_20261027 \
+    --output-dir /data/4T-2/dataset/hewu2008/part_sorting_20261027_clean
