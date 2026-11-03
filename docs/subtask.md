@@ -30,13 +30,6 @@ Position values:
 | middle     | use the left arm to pick up the door handle in the middle of the blue bin | use the right arm to pick up the silver pipe in the middle of the blue bin | use the right arm to pick up the L-shaped bent pipe in the middle of the blue bin |
 | right area | use the left arm to pick up the door handle in the right area of the blue bin | use the right arm to pick up the silver pipe in the right area of the blue bin | use the right arm to pick up the L-shaped bent pipe in the right area of the blue bin |
 
-Insert a layer word when objects are stacked:
-
-```
-use the right arm to pick up the top silver pipe in the right area of the blue bin
-use the right arm to pick up the bottom silver pipe in the right area of the blue bin
-```
-
 ## Place Subtask
 
 The landing position of each bin is fixed, so no position is specified.
