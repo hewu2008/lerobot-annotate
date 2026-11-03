@@ -20,4 +20,4 @@ export PYTHONPATH=`pwd`
 
 python -u -m backend.convert_cli \
     --dataset-root /data/4T-2/dataset/hewu2008/part_sorting_20261027 \
-    --output-dir /data/4T-2/dataset/hewu2008/part_sorting_20261027_clean
+    --output-dir /data/4T-2/dataset/hewu2008/part_sorting_20261027_subtask
